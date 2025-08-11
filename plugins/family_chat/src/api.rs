@@ -19,7 +19,9 @@ async fn static_handler(uri: Uri) -> impl IntoResponse {
     let file = if path.is_empty() {
         WEB_DIST.get_file("index.html")
     } else {
-        WEB_DIST.get_file(path).or_else(|| WEB_DIST.get_file("index.html"))
+        WEB_DIST
+            .get_file(path)
+            .or_else(|| WEB_DIST.get_file("index.html"))
     };
     if let Some(file) = file {
         let mime = mime_guess::from_path(path).first_or_octet_stream();
