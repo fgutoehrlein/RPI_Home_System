@@ -22,7 +22,10 @@ impl Storage {
         } else {
             HashMap::new()
         };
-        Ok(Self { file, data: Mutex::new(data) })
+        Ok(Self {
+            file,
+            data: Mutex::new(data),
+        })
     }
 
     /// Retrieve a value by key.

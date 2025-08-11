@@ -41,7 +41,9 @@ async fn run_stdio() -> Result<()> {
         id: Some(init_id.clone()),
         kind: Kind::Request,
         method: Some("plugin.init".into()),
-        params: Some(json!({"metadata": Metadata{ id:"sample_plugin".into(), name:"Sample Plugin".into(), version:"0.1.0".into(), needs: vec!["log".into(),"event".into(),"timer".into(),"storage".into()] }})),
+        params: Some(
+            json!({"metadata": Metadata{ id:"sample_plugin".into(), name:"Sample Plugin".into(), version:"0.1.0".into(), needs: vec!["log".into(),"event".into(),"timer".into(),"storage".into()] }}),
+        ),
         result: None,
         error: None,
         topic: None,
@@ -142,7 +144,9 @@ async fn send<W: AsyncWriteExt + Unpin>(w: &mut W, env: &Envelope) -> Result<()>
 async fn read<R: AsyncBufReadExt + Unpin>(r: &mut R) -> Result<Envelope> {
     let mut line = String::new();
     r.read_line(&mut line).await?;
-    if line.is_empty() { anyhow::bail!("eof") }
+    if line.is_empty() {
+        anyhow::bail!("eof")
+    }
     let env = serde_json::from_str(line.trim())?;
     Ok(env)
 }

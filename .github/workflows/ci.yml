@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --workspace
+      - name: Build release (native)
+        run: cargo build --release
+      - name: Upload native artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-binaries
+          path: target/release/
+      - name: Install cross
+        run: cargo install cross
+      - name: Build release (aarch64)
+        run: cross build --release --target aarch64-unknown-linux-gnu
+      - name: Upload aarch64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: aarch64-binaries
+          path: target/aarch64-unknown-linux-gnu/release/

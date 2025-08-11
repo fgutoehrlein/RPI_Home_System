@@ -2,7 +2,10 @@ use anyhow::Result;
 use clap::Parser;
 use tracing::{info, warn};
 
-use homecore::{cli::{Cli, Command, PluginCommand}, PluginManager, workspace_root};
+use homecore::{
+    cli::{Cli, Command, PluginCommand},
+    workspace_root, PluginManager,
+};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -23,10 +26,19 @@ async fn main() -> Result<()> {
             info!("plugins running - press Ctrl+C to exit");
             tokio::signal::ctrl_c().await?;
         }
-        Command::Plugin { command: PluginCommand::List } => {
+        Command::Plugin {
+            command: PluginCommand::List,
+        } => {
             let manager = PluginManager::discover(workspace.clone(), plugins_dir)?;
             for (manifest, status, path) in manager.list() {
-                println!("{:<15} {:<20} {:<8} {:?} {}", manifest.id, manifest.name, manifest.version, status, path.display());
+                println!(
+                    "{:<15} {:<20} {:<8} {:?} {}",
+                    manifest.id,
+                    manifest.name,
+                    manifest.version,
+                    status,
+                    path.display()
+                );
             }
         }
     }

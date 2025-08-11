@@ -1,11 +1,20 @@
-use std::{collections::{HashMap, HashSet}, path::{Path, PathBuf}, process::Stdio, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    path::{Path, PathBuf},
+    process::Stdio,
+    sync::Arc,
+};
 
 use anyhow::{Context, Result};
 use parking_lot::Mutex;
 use plugin_api::{Envelope, Kind};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use tokio::{io::{BufReader, BufWriter}, process::{Child, Command}, sync::oneshot};
+use tokio::{
+    io::{BufReader, BufWriter},
+    process::{Child, Command},
+    sync::oneshot,
+};
 use tracing::error;
 use uuid::Uuid;
 
@@ -127,7 +136,10 @@ impl PluginManager {
                 }
             }
         }
-        Ok(Self { workspace_root, plugins })
+        Ok(Self {
+            workspace_root,
+            plugins,
+        })
     }
 
     /// List current plugins and their status.
@@ -143,13 +155,12 @@ impl PluginManager {
         let keys: Vec<String> = self.plugins.keys().cloned().collect();
         for id in keys {
             let handle = self.plugins.get_mut(&id).unwrap();
-            let root = self.workspace_root.clone();
-            PluginManager::start_plugin(&root, handle).await?;
+            PluginManager::start_plugin(&self.workspace_root, handle).await?;
         }
         Ok(())
     }
 
-    async fn start_plugin(workspace_root: &PathBuf, handle: &mut PluginHandle) -> Result<()> {
+    async fn start_plugin(workspace_root: &Path, handle: &mut PluginHandle) -> Result<()> {
         let exec = handle.exec_path(workspace_root);
         let mut cmd = Command::new(exec);
         cmd.arg("--stdio").current_dir(&handle.dir);
@@ -249,36 +260,99 @@ impl PluginManager {
                                 if let Some(method) = env.method.as_deref() {
                                     if method == "log.write" {
                                         if let Some(params) = env.params {
-                                            if let (Some(level), Some(message)) = (params.get("level"), params.get("message")) {
-                                                if let (Some(level), Some(message)) = (level.as_str(), message.as_str()) {
+                                            if let (Some(level), Some(message)) =
+                                                (params.get("level"), params.get("message"))
+                                            {
+                                                if let (Some(level), Some(message)) =
+                                                    (level.as_str(), message.as_str())
+                                                {
                                                     crate::services::log::write(level, message);
                                                 }
                                             }
                                         }
-                                        let resp = Envelope { id: env.id, kind: Kind::Response, method: None, params: None, result: Some(json!({"ok":true})), error: None, topic: None, payload: None };
+                                        let resp = Envelope {
+                                            id: env.id,
+                                            kind: Kind::Response,
+                                            method: None,
+                                            params: None,
+                                            result: Some(json!({"ok":true})),
+                                            error: None,
+                                            topic: None,
+                                            payload: None,
+                                        };
                                         let mut w = writer.lock().await;
                                         let _ = write_envelope(&mut *w, &resp).await;
                                     } else if method == "event.subscribe" {
-                                        if let Some(params) = env.params { if let Some(arr) = params.get("topics").and_then(|t| t.as_array()) {
+                                        if let Some(params) = env.params {
+                                            if let Some(arr) =
+                                                params.get("topics").and_then(|t| t.as_array())
+                                            {
                                                 let mut subs = subscriptions.lock();
-                                                for topic in arr { if let Some(t) = topic.as_str() { subs.insert(t.to_string()); } }
-                                            } }
-                                        let resp = Envelope { id: env.id, kind: Kind::Response, method: None, params: None, result: Some(json!({"ok":true})), error: None, topic: None, payload: None };
+                                                for topic in arr {
+                                                    if let Some(t) = topic.as_str() {
+                                                        subs.insert(t.to_string());
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        let resp = Envelope {
+                                            id: env.id,
+                                            kind: Kind::Response,
+                                            method: None,
+                                            params: None,
+                                            result: Some(json!({"ok":true})),
+                                            error: None,
+                                            topic: None,
+                                            payload: None,
+                                        };
                                         let mut w = writer.lock().await;
                                         let _ = write_envelope(&mut *w, &resp).await;
                                     } else if method == "timer.set_interval" {
-                                        if let Some(params) = env.params { if let (Some(id_val), Some(ms_val)) = (params.get("id"), params.get("millis")) {
-                                                if let (Some(id), Some(ms)) = (id_val.as_str(), ms_val.as_u64()) {
+                                        if let Some(params) = env.params {
+                                            if let (Some(id_val), Some(ms_val)) =
+                                                (params.get("id"), params.get("millis"))
+                                            {
+                                                if let (Some(id), Some(ms)) =
+                                                    (id_val.as_str(), ms_val.as_u64())
+                                                {
                                                     let writer_inner = writer.clone();
-                                                    crate::services::timer::spawn_timer(writer_inner, crate::services::timer::TimerParams { id: id.to_string(), millis: ms });
+                                                    crate::services::timer::spawn_timer(
+                                                        writer_inner,
+                                                        crate::services::timer::TimerParams {
+                                                            id: id.to_string(),
+                                                            millis: ms,
+                                                        },
+                                                    );
                                                 }
-                                            } }
-                                        let resp = Envelope { id: env.id, kind: Kind::Response, method: None, params: None, result: Some(json!({"ok":true})), error: None, topic: None, payload: None };
+                                            }
+                                        }
+                                        let resp = Envelope {
+                                            id: env.id,
+                                            kind: Kind::Response,
+                                            method: None,
+                                            params: None,
+                                            result: Some(json!({"ok":true})),
+                                            error: None,
+                                            topic: None,
+                                            payload: None,
+                                        };
                                         let mut w = writer.lock().await;
                                         let _ = write_envelope(&mut *w, &resp).await;
                                     } else {
                                         // unknown method
-                                        let resp = Envelope { id: env.id, kind: Kind::Response, method: None, params: None, result: None, error: Some(plugin_api::RpcError{code: -32601, message: format!("unknown method {}", method)}), topic: None, payload: None };
+                                        let resp = Envelope {
+                                            id: env.id,
+                                            kind: Kind::Response,
+                                            method: None,
+                                            params: None,
+                                            result: None,
+                                            error: Some(plugin_api::RpcError {
+                                                code: -32601,
+                                                message: format!("unknown method {}", method),
+                                            }),
+                                            topic: None,
+                                            payload: None,
+                                        };
                                         let mut w = writer.lock().await;
                                         let _ = write_envelope(&mut *w, &resp).await;
                                     }
@@ -314,7 +388,16 @@ impl PluginManager {
         let handle = self.plugins.get(plugin_id).context("plugin not found")?;
         let writer = handle.writer.as_ref().context("plugin not running")?;
         let id = Uuid::new_v4().to_string();
-        let env = Envelope { id: Some(id.clone()), kind: Kind::Request, method: Some(method.to_string()), params: Some(params), result: None, error: None, topic: None, payload: None };
+        let env = Envelope {
+            id: Some(id.clone()),
+            kind: Kind::Request,
+            method: Some(method.to_string()),
+            params: Some(params),
+            result: None,
+            error: None,
+            topic: None,
+            payload: None,
+        };
         let (tx, rx) = oneshot::channel();
         handle.pending.lock().insert(id.clone(), tx);
         {
@@ -322,7 +405,9 @@ impl PluginManager {
             write_envelope(&mut *w, &env).await?;
         }
         let resp = rx.await?;
-        if let Some(err) = resp.error { anyhow::bail!(err.message); }
+        if let Some(err) = resp.error {
+            anyhow::bail!(err.message);
+        }
         Ok(resp.result.unwrap_or(Value::Null))
     }
 }

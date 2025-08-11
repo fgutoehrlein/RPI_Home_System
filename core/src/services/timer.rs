@@ -1,10 +1,10 @@
-use serde::Deserialize;
-use tokio::time::{self, Duration};
-use plugin_api::Envelope;
 use crate::ipc::write_envelope;
+use plugin_api::Envelope;
+use serde::Deserialize;
+use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use serde_json::json;
+use tokio::time::{self, Duration};
 
 #[derive(Debug, Deserialize)]
 pub struct TimerParams {
@@ -13,7 +13,10 @@ pub struct TimerParams {
 }
 
 /// Spawn a repeating timer that sends `timer.tick` events using the provided writer.
-pub fn spawn_timer(writer: Arc<Mutex<tokio::io::BufWriter<tokio::process::ChildStdin>>>, params: TimerParams) {
+pub fn spawn_timer(
+    writer: Arc<Mutex<tokio::io::BufWriter<tokio::process::ChildStdin>>>,
+    params: TimerParams,
+) {
     let TimerParams { id, millis } = params;
     tokio::spawn(async move {
         let mut interval = time::interval(Duration::from_millis(millis));

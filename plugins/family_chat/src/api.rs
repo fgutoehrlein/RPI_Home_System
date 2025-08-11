@@ -1,6 +1,6 @@
-use axum::{response::Html, routing::get, Router};
-use anyhow::Result;
 use crate::embed::WEB_DIST;
+use anyhow::Result;
+use axum::{response::Html, routing::get, Router};
 
 /// Build the HTTP application router.
 pub fn app_router() -> Router {
