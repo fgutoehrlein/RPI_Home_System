@@ -3,5 +3,6 @@ members = [
     "core",
     "plugin_api",
     "plugins/sample_plugin",
+    "plugins/family_chat",
 ]
 resolver = "2"
