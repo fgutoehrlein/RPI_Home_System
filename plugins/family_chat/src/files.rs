@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use anyhow::Result;
 use bytes::Bytes;
 use sha2::{Digest, Sha256};

@@ -25,7 +25,9 @@ struct Opts {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt().with_max_level(tracing::Level::INFO).init();
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::INFO)
+        .init();
     let opts = Opts::parse();
     plugin::run(opts.stdio, opts.bind).await
 }

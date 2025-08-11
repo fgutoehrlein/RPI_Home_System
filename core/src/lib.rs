@@ -1,7 +1,7 @@
 pub mod cli;
-pub mod plugin_host;
-pub mod ipc;
 pub mod events;
+pub mod ipc;
+pub mod plugin_host;
 pub mod services;
 
 pub use plugin_host::PluginManager;

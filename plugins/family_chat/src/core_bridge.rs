@@ -58,25 +58,20 @@ pub async fn run_stdio(bind: &str) -> Result<()> {
     });
 
     // event loop; respond to plugin.stop and then exit
-    loop {
-        match read(&mut reader).await {
-            Ok(env) => {
-                if env.kind == Kind::Request && env.method.as_deref() == Some("plugin.stop") {
-                    let resp = Envelope {
-                        id: env.id.clone(),
-                        kind: Kind::Response,
-                        method: None,
-                        params: None,
-                        result: Some(json!({})),
-                        error: None,
-                        topic: None,
-                        payload: None,
-                    };
-                    let _ = send(&mut writer, &resp).await;
-                    break;
-                }
-            }
-            Err(_) => break,
+    while let Ok(env) = read(&mut reader).await {
+        if env.kind == Kind::Request && env.method.as_deref() == Some("plugin.stop") {
+            let resp = Envelope {
+                id: env.id.clone(),
+                kind: Kind::Response,
+                method: None,
+                params: None,
+                result: Some(json!({})),
+                error: None,
+                topic: None,
+                payload: None,
+            };
+            let _ = send(&mut writer, &resp).await;
+            break;
         }
     }
     Ok(())

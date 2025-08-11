@@ -1,5 +1,9 @@
+#![allow(dead_code)]
+
 use anyhow::Result;
-use argon2::password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
+use argon2::password_hash::{
+    rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString,
+};
 use argon2::Argon2;
 
 /// Hash a passphrase using argon2id.

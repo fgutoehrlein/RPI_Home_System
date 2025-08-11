@@ -31,3 +31,17 @@ The sample plugin subscribes to `timer.tick` and logs a message every second. It
 ```
 cargo test --workspace
 ```
+
+## CI
+
+Native:
+
+```
+cargo test --workspace && cargo build --release
+```
+
+Aarch64 (lokal):
+
+```
+cargo install cross && cross build --release --target aarch64-unknown-linux-gnu
+```
