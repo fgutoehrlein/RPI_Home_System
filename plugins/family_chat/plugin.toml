@@ -1,0 +1,6 @@
+name = "Family Chat"
+id = "family_chat"
+version = "0.1.0"
+api_version = "1"
+exec = "family_chat"
+permissions = ["storage", "timer", "log"]
