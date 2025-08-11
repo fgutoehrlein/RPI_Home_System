@@ -105,7 +105,6 @@ impl PluginHandle {
 /// Manager responsible for discovering and running plugins.
 pub struct PluginManager {
     workspace_root: PathBuf,
-    plugins_dir: PathBuf,
     pub plugins: HashMap<String, PluginHandle>,
 }
 
@@ -128,7 +127,7 @@ impl PluginManager {
                 }
             }
         }
-        Ok(Self { workspace_root, plugins_dir, plugins })
+        Ok(Self { workspace_root, plugins })
     }
 
     /// List current plugins and their status.
