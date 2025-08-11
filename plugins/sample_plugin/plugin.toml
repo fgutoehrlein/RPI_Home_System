@@ -1,0 +1,6 @@
+name = "Sample Plugin"
+id = "sample_plugin"
+version = "0.1.0"
+api_version = "1"
+exec = "sample_plugin"
+permissions = ["notify", "filesystem:read"]
