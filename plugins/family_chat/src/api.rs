@@ -1,19 +1,36 @@
 use crate::embed::WEB_DIST;
 use anyhow::Result;
-use axum::{response::Html, routing::get, Router};
+use axum::{
+    http::{header, StatusCode, Uri},
+    response::IntoResponse,
+    routing::get,
+    Router,
+};
 
 /// Build the HTTP application router.
 pub fn app_router() -> Router {
     Router::new()
-        .route("/", get(index))
         .route("/api/health", get(health))
+        .fallback(get(static_handler))
 }
 
-async fn index() -> Html<&'static str> {
-    let file = WEB_DIST
-        .get_file("index.html")
-        .expect("index.html not found in embedded assets");
-    Html(file.contents_utf8().unwrap())
+async fn static_handler(uri: Uri) -> impl IntoResponse {
+    let path = uri.path().trim_start_matches('/');
+    let file = if path.is_empty() {
+        WEB_DIST.get_file("index.html")
+    } else {
+        WEB_DIST.get_file(path).or_else(|| WEB_DIST.get_file("index.html"))
+    };
+    if let Some(file) = file {
+        let mime = mime_guess::from_path(path).first_or_octet_stream();
+        (
+            [(header::CONTENT_TYPE, mime.as_ref())],
+            file.contents().to_vec(),
+        )
+            .into_response()
+    } else {
+        StatusCode::NOT_FOUND.into_response()
+    }
 }
 
 async fn health() -> &'static str {
