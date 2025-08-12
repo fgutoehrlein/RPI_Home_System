@@ -55,6 +55,14 @@ mod tests {
 
     #[tokio::test]
     async fn serves_index() {
+        // Skip the test if the web UI hasn't been built. This allows running
+        // `cargo test` without first generating `webui/dist` assets, which are
+        // ignored in version control.
+        if WEB_DIST.get_file("index.html").is_none() {
+            eprintln!("webui/dist/index.html missing; skipping serves_index test");
+            return;
+        }
+
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
         listener.set_nonblocking(true).unwrap();
