@@ -6,10 +6,8 @@ assets under `webui/dist` which are embedded at build time.
 
 ## Building
 
-The build script looks for `webui/dist` and will automatically run
-`npm ci && npm run build` when the directory is missing. This keeps CI and
-fresh checkouts working without extra steps. For faster subsequent builds you
-can invoke the commands yourself:
+Before compiling the plugin you need the web UI assets under `webui/dist`.
+Generate them with:
 
 ```
 cd plugins/family_chat/webui
