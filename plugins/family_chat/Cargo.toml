@@ -34,3 +34,4 @@ parking_lot = "0.12"
 tokio-util = "0.7"
 walkdir = "2"
 plugin_api = { path = "../../plugin_api" }
+rust-embed = "8"
