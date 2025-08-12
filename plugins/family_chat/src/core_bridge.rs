@@ -4,6 +4,17 @@ use serde_json::json;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use uuid::Uuid;
 
+/// Abstraction over the communication bridge to the core.
+pub trait CoreBridge: Send + Sync {
+    fn emit(&self, _event: &str) {}
+}
+
+/// A no-op bridge used when running the server standalone or in tests.
+#[derive(Clone, Default)]
+pub struct NullCoreBridge;
+
+impl CoreBridge for NullCoreBridge {}
+
 /// Run the stdio protocol handshake with the core and then start the HTTP server.
 pub async fn run_stdio(bind: &str) -> Result<()> {
     let stdin = tokio::io::stdin();
