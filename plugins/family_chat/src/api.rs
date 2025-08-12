@@ -24,7 +24,7 @@ async fn static_handler(uri: Uri) -> impl IntoResponse {
             .or_else(|| WEB_DIST.get_file("index.html"))
     };
     if let Some(file) = file {
-        let mime = mime_guess::from_path(path).first_or_octet_stream();
+        let mime = mime_guess::from_path(file.path()).first_or_octet_stream();
         (
             [(header::CONTENT_TYPE, mime.as_ref())],
             file.contents().to_vec(),
@@ -51,7 +51,7 @@ pub async fn run_http_server(bind: String) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hyper::{Client, Uri};
+    use hyper::{header, Client, Uri};
 
     #[tokio::test]
     async fn serves_index() {
@@ -78,6 +78,8 @@ mod tests {
         let uri: Uri = format!("http://{}/", addr).parse().unwrap();
         let resp = client.get(uri).await.unwrap();
         assert!(resp.status().is_success());
+        let content_type = resp.headers().get(header::CONTENT_TYPE).unwrap();
+        assert_eq!(content_type, "text/html");
         server.abort();
     }
 }
