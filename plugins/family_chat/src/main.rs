@@ -11,6 +11,9 @@ mod model;
 mod plugin;
 mod rooms;
 mod ws;
+mod presence;
+mod reads;
+mod typing;
 
 use anyhow::Result;
 use clap::Parser;

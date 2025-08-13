@@ -1,4 +1,4 @@
-use crate::{auth, config::Config, db, embed::ui_router, files, messages, rooms};
+use crate::{auth, config::Config, db, embed::ui_router, files, messages, rooms, reads, presence, typing};
 use anyhow::Result;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::{
@@ -47,6 +47,8 @@ pub struct AppState {
     pub auth_file: PathBuf,
     pub login_limiter: auth::LoginRateLimiter,
     pub ws_members: std::sync::Arc<Mutex<HashMap<Uuid, HashSet<u32>>>>,
+    pub presence: std::sync::Arc<presence::Presence>,
+    pub typing: std::sync::Arc<typing::TypingTracker>,
 }
 
 impl AppState {
@@ -76,6 +78,8 @@ impl AppState {
             auth_file,
             login_limiter: auth::LoginRateLimiter::new(5, std::time::Duration::from_secs(60)),
             ws_members: std::sync::Arc::new(Mutex::new(HashMap::new())),
+            presence: std::sync::Arc::new(presence::Presence::new(std::time::Duration::from_secs(1))),
+            typing: std::sync::Arc::new(typing::TypingTracker::new(std::time::Duration::from_secs(2))),
         })
     }
 }
@@ -88,6 +92,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/rooms", get(list_rooms).post(create_room))
         .route("/api/dm/:user_id", get(get_dm))
         .route("/api/messages", post(post_message).get(list_messages))
+        .route("/api/read_pointer", post(update_read_pointer))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             auth_middleware,
@@ -559,7 +564,7 @@ async fn create_room(
 struct RoomWithUnread {
     #[serde(flatten)]
     room: rooms::Room,
-    unread_count: i64,
+    unread_count: u32,
 }
 
 async fn list_rooms(
@@ -572,15 +577,17 @@ async fn list_rooms(
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
     let rooms = rooms::list_rooms_for_user(&conn, user.id)
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
-    Ok(Json(
-        rooms
-            .into_iter()
-            .map(|room| RoomWithUnread {
+    let items = rooms
+        .into_iter()
+        .map(|room| {
+            let unread = reads::unread_count(&conn, user.id, &room.id).unwrap_or(0);
+            RoomWithUnread {
                 room,
-                unread_count: 0,
-            })
-            .collect(),
-    ))
+                unread_count: unread,
+            }
+        })
+        .collect();
+    Ok(Json(items))
 }
 
 async fn get_dm(
@@ -607,6 +614,47 @@ async fn get_dm(
     let room = rooms::get_or_create_dm_room(&conn, user.id, other_id)
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
     Ok((StatusCode::OK, Json(room)))
+}
+
+#[derive(Deserialize)]
+struct ReadPointerReq {
+    room_id: Uuid,
+    message_id: Option<Uuid>,
+    timestamp: Option<i64>,
+}
+
+async fn update_read_pointer(
+    State(state): State<AppState>,
+    Extension(user): Extension<auth::User>,
+    Json(req): Json<ReadPointerReq>,
+) -> Result<StatusCode, (StatusCode, Json<ErrorResp>)> {
+    let conn = state
+        .pool
+        .get()
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    let allowed = rooms::user_can_access_room(&conn, &req.room_id, user.id)
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    if !allowed {
+        return Err(err(StatusCode::FORBIDDEN, "forbidden"));
+    }
+    let ts = if let Some(mid) = req.message_id {
+        let mut stmt = conn
+            .prepare("SELECT created_at FROM messages WHERE id = ?1")
+            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+        stmt
+            .query_row([mid.to_string()], |row| row.get(0))
+            .map_err(|_| err(StatusCode::BAD_REQUEST, "message_not_found"))?
+    } else if let Some(ts) = req.timestamp {
+        ts
+    } else {
+        OffsetDateTime::now_utc().unix_timestamp()
+    };
+    reads::set_read_pointer(&conn, user.id, &req.room_id, ts)
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    let _ = state.event_tx.send(
+        serde_json::json!({"t":"unread","room_id":req.room_id,"user_id":user.id,"count":0}).to_string(),
+    );
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Deserialize)]
@@ -642,9 +690,27 @@ async fn post_message(
         "empty_message" => err(StatusCode::BAD_REQUEST, "empty_message"),
         _ => err(StatusCode::INTERNAL_SERVER_ERROR, "db"),
     })?;
+    reads::set_read_pointer(&conn, user.id, &req.room_id, msg.created_at)
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
     let _ = state
         .event_tx
         .send(serde_json::json!({"t":"message","room_id":req.room_id,"message":msg}).to_string());
+    let members: Vec<u32> = state
+        .ws_members
+        .lock()
+        .get(&req.room_id)
+        .map(|s| s.iter().copied().collect())
+        .unwrap_or_default();
+    for uid in members {
+        if uid == user.id {
+            continue;
+        }
+        if let Ok(unread) = reads::unread_count(&conn, uid, &req.room_id) {
+            let _ = state.event_tx.send(
+                serde_json::json!({"t":"unread","room_id":req.room_id,"user_id":uid,"count":unread}).to_string(),
+            );
+        }
+    }
     Ok((StatusCode::CREATED, Json(msg)))
 }
 
@@ -698,6 +764,11 @@ async fn ws_handler(
 async fn handle_socket(stream: WebSocket, state: AppState, user: auth::User) {
     let (mut sender, mut receiver) = stream.split();
     let mut rx = BroadcastStream::new(state.event_tx.subscribe());
+    if state.presence.connect(user.id) {
+        let _ = state
+            .event_tx
+            .send(serde_json::json!({"t":"presence","user_id":user.id,"state":"online"}).to_string());
+    }
     let _ = sender.send(Message::Text("hello".into())).await;
     loop {
         tokio::select! {
@@ -715,6 +786,8 @@ async fn handle_socket(stream: WebSocket, state: AppState, user: auth::User) {
                                 let _ = sender.send(Message::Text(ev)).await;
                             }
                         }
+                    } else {
+                        let _ = sender.send(Message::Text(ev)).await;
                     }
                 }
             },
@@ -738,8 +811,32 @@ async fn handle_socket(stream: WebSocket, state: AppState, user: auth::User) {
                                                 let mut guard = state.ws_members.lock();
                                                 guard.entry(room_id).or_default().insert(user.id);
                                             }
-                                            let _ = sender.send(Message::Text("joined".into())).await;
+                                            let presence_map = state.presence.snapshot().into_iter().map(|(k,v)| (k.to_string(), v)).collect::<std::collections::HashMap<_,_>>();
+                                            let unread = state
+                                                .pool
+                                                .get()
+                                                .ok()
+                                                .and_then(|conn| reads::unread_count(&conn, user.id, &room_id).ok())
+                                                .unwrap_or(0);
+                                            let snap = serde_json::json!({"t":"snapshot","room_id":room_id,"presence":presence_map,"unread":unread});
+                                            let _ = sender.send(Message::Text(snap.to_string())).await;
                                             continue;
+                                        }
+                                    }
+                                }
+                            } else if v.get("t").and_then(|a| a.as_str()) == Some("typing") {
+                                if let Some(id_str) = v.get("room_id").and_then(|r| r.as_str()) {
+                                    if let Ok(room_id) = Uuid::parse_str(id_str) {
+                                        let joined = state
+                                            .ws_members
+                                            .lock()
+                                            .get(&room_id)
+                                            .map(|s| s.contains(&user.id))
+                                            .unwrap_or(false);
+                                        if joined && state.typing.typing(user.id, room_id) {
+                                            let _ = state.event_tx.send(
+                                                serde_json::json!({"t":"typing","room_id":room_id,"user_id":user.id}).to_string(),
+                                            );
                                         }
                                     }
                                 }
@@ -752,6 +849,18 @@ async fn handle_socket(stream: WebSocket, state: AppState, user: auth::User) {
             },
             else => break,
         }
+    }
+    {
+        let mut guard = state.ws_members.lock();
+        for members in guard.values_mut() {
+            members.remove(&user.id);
+        }
+        guard.retain(|_, v| !v.is_empty());
+    }
+    if state.presence.disconnect(user.id).await {
+        let _ = state
+            .event_tx
+            .send(serde_json::json!({"t":"presence","user_id":user.id,"state":"offline"}).to_string());
     }
 }
 
