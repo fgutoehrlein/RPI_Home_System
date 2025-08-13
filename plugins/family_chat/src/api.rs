@@ -1,5 +1,6 @@
 use crate::{auth, config::Config, embed::ui_router, files};
 use anyhow::Result;
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::{
     body::StreamBody,
     extract::{Multipart, Path, State},
@@ -9,7 +10,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use futures::{StreamExt, SinkExt};
+use futures::{SinkExt, StreamExt};
 use parking_lot::Mutex;
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
@@ -18,7 +19,6 @@ use std::{collections::HashMap, net::SocketAddr, path::PathBuf};
 use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_util::io::ReaderStream;
-use axum::extract::ws::{WebSocket, WebSocketUpgrade, Message};
 
 #[derive(Clone)]
 pub struct FileMeta {
@@ -61,13 +61,20 @@ pub fn build_router(state: AppState) -> Router {
     let protected = Router::new()
         .route("/api/files", post(upload_file))
         .route("/api/files/:id", get(download_file))
-        .layer(middleware::from_fn_with_state(state.clone(), auth_middleware))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth_middleware,
+        ))
         .layer(axum::extract::DefaultBodyLimit::max(
             state.config.max_upload_bytes() as usize,
         ));
-    let ws_route = Router::new()
-        .route("/ws", get(ws_handler))
-        .layer(middleware::from_fn_with_state(state.clone(), auth_middleware));
+    let ws_route =
+        Router::new()
+            .route("/ws", get(ws_handler))
+            .layer(middleware::from_fn_with_state(
+                state.clone(),
+                auth_middleware,
+            ));
     let ui: Router<AppState> = ui_router().with_state(());
     Router::new()
         .route("/api/health", get(health))

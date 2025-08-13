@@ -1,11 +1,15 @@
-use family_chat::{api::{build_router, AppState}, config::Config, auth};
-use axum::http::{StatusCode, header};
+use axum::http::{header, StatusCode};
+use family_chat::{
+    api::{build_router, AppState},
+    auth,
+    config::Config,
+};
+use futures::StreamExt;
 use hyper::Client;
 use std::net::{SocketAddr, TcpListener};
 use tokio::task::JoinHandle;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-use futures::StreamExt;
 
 async fn spawn_server() -> (SocketAddr, JoinHandle<()>, AppState, tempfile::TempDir) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -13,7 +17,11 @@ async fn spawn_server() -> (SocketAddr, JoinHandle<()>, AppState, tempfile::Temp
     listener.set_nonblocking(true).unwrap();
 
     let tmp = tempfile::tempdir().unwrap();
-    let config = Config { bind: addr.to_string(), data_dir: tmp.path().to_path_buf(), max_upload_mb: 5 };
+    let config = Config {
+        bind: addr.to_string(),
+        data_dir: tmp.path().to_path_buf(),
+        max_upload_mb: 5,
+    };
     let state = AppState::new(config).await.unwrap();
     let app = build_router(state.clone());
     let server = tokio::spawn(async move {
@@ -35,19 +43,30 @@ async fn serves_ui_and_spa_fallback() {
     let uri = format!("http://{}/", addr).parse().unwrap();
     let resp = client.get(uri).await.unwrap();
     assert!(resp.status().is_success());
-    assert_eq!(resp.headers().get(header::CONTENT_TYPE).unwrap(), "text/html; charset=utf-8");
+    assert_eq!(
+        resp.headers().get(header::CONTENT_TYPE).unwrap(),
+        "text/html; charset=utf-8"
+    );
 
     // asset
-    let uri = format!("http://{}/assets/app-12345678.js", addr).parse().unwrap();
+    let uri = format!("http://{}/assets/app-12345678.js", addr)
+        .parse()
+        .unwrap();
     let resp = client.get(uri).await.unwrap();
     assert!(resp.status().is_success());
-    assert_eq!(resp.headers().get(header::CONTENT_TYPE).unwrap(), "application/javascript");
+    assert_eq!(
+        resp.headers().get(header::CONTENT_TYPE).unwrap(),
+        "application/javascript"
+    );
 
     // spa fallback
     let uri = format!("http://{}/deep/link", addr).parse().unwrap();
     let resp = client.get(uri).await.unwrap();
     assert!(resp.status().is_success());
-    assert_eq!(resp.headers().get(header::CONTENT_TYPE).unwrap(), "text/html; charset=utf-8");
+    assert_eq!(
+        resp.headers().get(header::CONTENT_TYPE).unwrap(),
+        "text/html; charset=utf-8"
+    );
 
     server.abort();
 }
@@ -87,7 +106,11 @@ async fn upload_download_and_auth() {
     assert_eq!(body, "hello world");
 
     // unauthorized
-    let resp = client.post(format!("http://{}/api/files", addr)).send().await.unwrap();
+    let resp = client
+        .post(format!("http://{}/api/files", addr))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 
     // websocket invalid token

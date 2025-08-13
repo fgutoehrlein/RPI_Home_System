@@ -41,7 +41,10 @@ pub struct Claims {
 /// Issue a JWT for a given subject valid for the provided duration.
 pub fn issue_jwt(secret: &[u8], sub: &str, valid_for: Duration) -> Result<String> {
     let exp = (OffsetDateTime::now_utc() + valid_for).unix_timestamp() as usize;
-    let claims = Claims { sub: sub.into(), exp };
+    let claims = Claims {
+        sub: sub.into(),
+        exp,
+    };
     let token = encode(
         &Header::default(),
         &claims,
@@ -54,11 +57,7 @@ pub fn issue_jwt(secret: &[u8], sub: &str, valid_for: Duration) -> Result<String
 pub fn verify_jwt(secret: &[u8], token: &str) -> Result<Claims> {
     let mut validation = Validation::new(Algorithm::HS256);
     validation.validate_exp = true;
-    let data = decode::<Claims>(
-        token,
-        &DecodingKey::from_secret(secret),
-        &validation,
-    )?;
+    let data = decode::<Claims>(token, &DecodingKey::from_secret(secret), &validation)?;
     if data.claims.exp < OffsetDateTime::now_utc().unix_timestamp() as usize {
         anyhow::bail!("expired");
     }

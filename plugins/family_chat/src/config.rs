@@ -25,7 +25,11 @@ impl Config {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(5);
-        Self { bind, data_dir, max_upload_mb }
+        Self {
+            bind,
+            data_dir,
+            max_upload_mb,
+        }
     }
 
     /// Helper to return the upload limit in bytes.
@@ -62,4 +66,3 @@ mod tests {
         assert_eq!(cfg.max_upload_mb, 10);
     }
 }
-
