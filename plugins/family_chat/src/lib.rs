@@ -6,6 +6,7 @@ pub mod db;
 pub mod embed;
 pub mod files;
 pub mod housekeeping;
+pub mod messages;
 pub mod model;
 pub mod plugin;
 pub mod rooms;

@@ -6,6 +6,7 @@ mod db;
 mod embed;
 mod files;
 mod housekeeping;
+mod messages;
 mod model;
 mod plugin;
 mod rooms;

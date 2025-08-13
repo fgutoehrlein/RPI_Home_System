@@ -43,10 +43,12 @@ CREATE TABLE IF NOT EXISTS room_members (
 CREATE TABLE IF NOT EXISTS messages (
   id TEXT PRIMARY KEY,
   room_id TEXT NOT NULL REFERENCES rooms(id),
-  author_id TEXT NOT NULL REFERENCES users(id),
+  author_id TEXT NOT NULL,
   text_md TEXT NOT NULL,
   created_at INTEGER NOT NULL,
-  edited_at INTEGER
+  edited_at INTEGER,
+  idempotency_key TEXT,
+  UNIQUE(author_id, idempotency_key)
 );
 
 CREATE TABLE IF NOT EXISTS attachments (

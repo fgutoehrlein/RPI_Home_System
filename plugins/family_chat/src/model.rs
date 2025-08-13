@@ -18,11 +18,11 @@ pub struct Room {
     pub created_at: i64,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct Message {
     pub id: Uuid,
     pub room_id: Uuid,
-    pub author_id: Uuid,
+    pub author_id: u32,
     pub text_md: String,
     pub created_at: i64,
     pub edited_at: Option<i64>,
