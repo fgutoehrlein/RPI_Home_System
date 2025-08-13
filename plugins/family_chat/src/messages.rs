@@ -28,7 +28,8 @@ pub fn create_message(
         )?;
         if let Some(existing) = stmt
             .query_row(params![author_id.to_string(), key], |row| row_to_msg(row))
-            .optional()? {
+            .optional()?
+        {
             return Ok(existing);
         }
     }
@@ -59,10 +60,7 @@ fn row_to_msg(row: &rusqlite::Row<'_>) -> rusqlite::Result<Message> {
     Ok(Message {
         id: Uuid::parse_str(row.get::<_, String>(0)?.as_str()).unwrap(),
         room_id: Uuid::parse_str(row.get::<_, String>(1)?.as_str()).unwrap(),
-        author_id: row
-            .get::<_, String>(2)?
-            .parse::<u32>()
-            .unwrap_or_default(),
+        author_id: row.get::<_, String>(2)?.parse::<u32>().unwrap_or_default(),
         text_md: row.get(3)?,
         created_at: row.get(4)?,
         edited_at: row.get(5).ok(),
@@ -80,8 +78,7 @@ pub fn list_messages(
     let (ts, id) = match before {
         Some(Cursor::Timestamp(ts)) => (ts, Uuid::nil()),
         Some(Cursor::Id(id)) => {
-            let mut stmt =
-                conn.prepare("SELECT created_at FROM messages WHERE id = ?1")?;
+            let mut stmt = conn.prepare("SELECT created_at FROM messages WHERE id = ?1")?;
             let ts: Option<i64> = stmt
                 .query_row([id.to_string()], |row| row.get(0))
                 .optional()?;
@@ -137,12 +134,16 @@ mod tests {
         let all = list_messages(&conn, &room_id, None, 10).unwrap();
         let first = list_messages(&conn, &room_id, None, 2).unwrap();
         assert_eq!(first.len(), 2);
-        let second =
-            list_messages(&conn, &room_id, Some(Cursor::Id(first.last().unwrap().id)), 2).unwrap();
+        let second = list_messages(
+            &conn,
+            &room_id,
+            Some(Cursor::Id(first.last().unwrap().id)),
+            2,
+        )
+        .unwrap();
         assert_eq!(second.len(), 1);
         let mut combined = first.clone();
         combined.extend(second.clone());
         assert_eq!(combined, all);
     }
 }
-

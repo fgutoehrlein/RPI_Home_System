@@ -6,11 +6,11 @@ mod db;
 mod embed;
 mod files;
 mod housekeeping;
+mod messages;
 mod model;
 mod plugin;
 mod rooms;
 mod ws;
-mod messages;
 
 use anyhow::Result;
 use clap::Parser;

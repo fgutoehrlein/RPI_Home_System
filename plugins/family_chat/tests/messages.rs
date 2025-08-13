@@ -1,9 +1,12 @@
 use axum::http::StatusCode;
-use family_chat::{api::{build_router, AppState}, config::Config};
+use family_chat::{
+    api::{build_router, AppState},
+    config::Config,
+};
 use futures::{SinkExt, StreamExt};
-use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use std::net::{SocketAddr, TcpListener};
 use tokio::task::JoinHandle;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::{connect_async, tungstenite::Message as WsMessage};
 
 async fn spawn_server() -> (SocketAddr, JoinHandle<()>, AppState, tempfile::TempDir) {
@@ -61,9 +64,7 @@ async fn message_flow_and_pagination() {
         if !resp.status().is_success() {
             panic!("login failed {}", resp.text().await.unwrap());
         }
-        resp.json::<serde_json::Value>()
-            .await
-            .unwrap()["token"]
+        resp.json::<serde_json::Value>().await.unwrap()["token"]
             .as_str()
             .unwrap()
             .to_string()
@@ -78,9 +79,7 @@ async fn message_flow_and_pagination() {
         if !resp.status().is_success() {
             panic!("login failed {}", resp.text().await.unwrap());
         }
-        resp.json::<serde_json::Value>()
-            .await
-            .unwrap()["token"]
+        resp.json::<serde_json::Value>().await.unwrap()["token"]
             .as_str()
             .unwrap()
             .to_string()
@@ -95,9 +94,7 @@ async fn message_flow_and_pagination() {
         if !resp.status().is_success() {
             panic!("login failed {}", resp.text().await.unwrap());
         }
-        resp.json::<serde_json::Value>()
-            .await
-            .unwrap()["token"]
+        resp.json::<serde_json::Value>().await.unwrap()["token"]
             .as_str()
             .unwrap()
             .to_string()
@@ -171,7 +168,10 @@ async fn message_flow_and_pagination() {
 
     // pagination
     let all: Vec<serde_json::Value> = client
-        .get(format!("http://{}/api/messages?room_id={}&limit=50", addr, room_id))
+        .get(format!(
+            "http://{}/api/messages?room_id={}&limit=50",
+            addr, room_id
+        ))
         .bearer_auth(&alice_token)
         .send()
         .await
@@ -181,7 +181,10 @@ async fn message_flow_and_pagination() {
         .unwrap();
     assert_eq!(all.len(), 3);
     let page1: Vec<serde_json::Value> = client
-        .get(format!("http://{}/api/messages?room_id={}&limit=2", addr, room_id))
+        .get(format!(
+            "http://{}/api/messages?room_id={}&limit=2",
+            addr, room_id
+        ))
         .bearer_auth(&alice_token)
         .send()
         .await

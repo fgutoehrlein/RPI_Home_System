@@ -1,4 +1,4 @@
-use crate::{auth, config::Config, db, embed::ui_router, files, rooms, messages};
+use crate::{auth, config::Config, db, embed::ui_router, files, messages, rooms};
 use anyhow::Result;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::{
@@ -642,9 +642,9 @@ async fn post_message(
         "empty_message" => err(StatusCode::BAD_REQUEST, "empty_message"),
         _ => err(StatusCode::INTERNAL_SERVER_ERROR, "db"),
     })?;
-    let _ = state.event_tx.send(
-        serde_json::json!({"t":"message","room_id":req.room_id,"message":msg}).to_string(),
-    );
+    let _ = state
+        .event_tx
+        .send(serde_json::json!({"t":"message","room_id":req.room_id,"message":msg}).to_string());
     Ok((StatusCode::CREATED, Json(msg)))
 }
 
