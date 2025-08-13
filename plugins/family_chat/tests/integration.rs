@@ -5,11 +5,12 @@ use family_chat::{
     auth,
     config::Config,
 };
-use futures::StreamExt;
+use futures::{SinkExt, StreamExt};
 use hyper::Client;
 use std::net::{SocketAddr, TcpListener};
 use tokio::task::JoinHandle;
-use tokio_tungstenite::connect_async;
+use tokio_tungstenite::{connect_async, tungstenite::Message as WsMessage};
+use uuid::Uuid;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
 async fn spawn_server() -> (SocketAddr, JoinHandle<()>, AppState, tempfile::TempDir) {
@@ -350,6 +351,198 @@ async fn admin_user_management() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+
+    server.abort();
+}
+
+#[tokio::test]
+async fn rooms_and_dms_listing() {
+    let (addr, server, _state, _tmp) = spawn_server().await;
+    let client = reqwest::Client::new();
+
+    let body = serde_json::json!({
+        "passphrase": "supersecret",
+        "users": [
+            {"username": "admin", "display_name": "Admin", "admin": true},
+            {"username": "alice", "display_name": "Alice", "admin": false},
+            {"username": "bob", "display_name": "Bob", "admin": false}
+        ]
+    });
+    client
+        .post(format!("http://{}/api/bootstrap", addr))
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+
+    let admin_token = client
+        .post(format!("http://{}/api/login", addr))
+        .json(&serde_json::json!({"username":"admin","passphrase":"supersecret"}))
+        .send()
+        .await
+        .unwrap()
+        .json::<serde_json::Value>()
+        .await
+        .unwrap()["token"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let resp = client
+        .post(format!("http://{}/api/rooms", addr))
+        .bearer_auth(&admin_token)
+        .json(&serde_json::json!({"name":"General","slug":"general"}))
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+
+    let resp = client
+        .get(format!("http://{}/api/rooms", addr))
+        .bearer_auth(&admin_token)
+        .send()
+        .await
+        .unwrap();
+    let rooms: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(rooms.as_array().unwrap().len(), 1);
+
+    let dm = client
+        .get(format!("http://{}/api/dm/2", addr))
+        .bearer_auth(&admin_token)
+        .send()
+        .await
+        .unwrap()
+        .json::<serde_json::Value>()
+        .await
+        .unwrap();
+    let dm_id = dm["id"].as_str().unwrap().to_string();
+
+    let dm2 = client
+        .get(format!("http://{}/api/dm/2", addr))
+        .bearer_auth(&admin_token)
+        .send()
+        .await
+        .unwrap()
+        .json::<serde_json::Value>()
+        .await
+        .unwrap();
+    assert_eq!(dm_id, dm2["id"].as_str().unwrap());
+
+    let alice_token = client
+        .post(format!("http://{}/api/login", addr))
+        .json(&serde_json::json!({"username":"alice","passphrase":"supersecret"}))
+        .send()
+        .await
+        .unwrap()
+        .json::<serde_json::Value>()
+        .await
+        .unwrap()["token"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let bob_token = client
+        .post(format!("http://{}/api/login", addr))
+        .json(&serde_json::json!({"username":"bob","passphrase":"supersecret"}))
+        .send()
+        .await
+        .unwrap()
+        .json::<serde_json::Value>()
+        .await
+        .unwrap()["token"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let resp = client
+        .get(format!("http://{}/api/rooms", addr))
+        .bearer_auth(&alice_token)
+        .send()
+        .await
+        .unwrap();
+    let rooms: serde_json::Value = resp.json().await.unwrap();
+    assert!(rooms
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|r| r["id"].as_str().unwrap() == dm_id));
+
+    let resp = client
+        .get(format!("http://{}/api/rooms", addr))
+        .bearer_auth(&bob_token)
+        .send()
+        .await
+        .unwrap();
+    let rooms: serde_json::Value = resp.json().await.unwrap();
+    assert!(!rooms
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|r| r["id"].as_str().unwrap() == dm_id));
+
+    server.abort();
+}
+
+#[tokio::test]
+async fn ws_join_registers_membership() {
+    let (addr, server, state, _tmp) = spawn_server().await;
+    let client = reqwest::Client::new();
+
+    let body = serde_json::json!({
+        "passphrase": "supersecret",
+        "users": [
+            {"username": "admin", "display_name": "Admin", "admin": true},
+            {"username": "user", "display_name": "User", "admin": false}
+        ]
+    });
+    client
+        .post(format!("http://{}/api/bootstrap", addr))
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+
+    let token = client
+        .post(format!("http://{}/api/login", addr))
+        .json(&serde_json::json!({"username":"admin","passphrase":"supersecret"}))
+        .send()
+        .await
+        .unwrap()
+        .json::<serde_json::Value>()
+        .await
+        .unwrap()["token"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let room = client
+        .post(format!("http://{}/api/rooms", addr))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({"name":"General","slug":"general"}))
+        .send()
+        .await
+        .unwrap()
+        .json::<serde_json::Value>()
+        .await
+        .unwrap();
+    let room_id = room["id"].as_str().unwrap().to_string();
+
+    let url = format!("ws://{}/ws", addr);
+    let mut req = url.into_client_request().unwrap();
+    req.headers_mut()
+        .append("Authorization", format!("Bearer {}", token).parse().unwrap());
+    let (mut ws, _) = connect_async(req).await.unwrap();
+    ws.next().await.unwrap().unwrap();
+    ws.send(WsMessage::Text(format!("{{\"action\":\"join\",\"room_id\":\"{}\"}}", room_id)))
+        .await
+        .unwrap();
+    ws.next().await.unwrap().unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    assert!(state
+        .ws_members
+        .lock()
+        .get(&Uuid::parse_str(&room_id).unwrap())
+        .unwrap()
+        .contains(&1));
 
     server.abort();
 }

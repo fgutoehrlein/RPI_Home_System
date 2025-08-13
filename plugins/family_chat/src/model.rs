@@ -15,6 +15,7 @@ pub struct Room {
     pub slug: String,
     pub name: String,
     pub is_dm: bool,
+    pub created_at: i64,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

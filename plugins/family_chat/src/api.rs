@@ -1,4 +1,4 @@
-use crate::{auth, config::Config, embed::ui_router, files};
+use crate::{auth, config::Config, db, embed::ui_router, files, rooms};
 use anyhow::Result;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::{
@@ -27,6 +27,7 @@ use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_util::io::ReaderStream;
 use url::Url;
+use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct FileMeta {
@@ -45,6 +46,7 @@ pub struct AppState {
     pub auth: std::sync::Arc<tokio::sync::Mutex<Option<auth::AuthConfig>>>,
     pub auth_file: PathBuf,
     pub login_limiter: auth::LoginRateLimiter,
+    pub ws_members: std::sync::Arc<Mutex<HashMap<Uuid, HashSet<u32>>>>,
 }
 
 impl AppState {
@@ -53,6 +55,10 @@ impl AppState {
         tokio::fs::create_dir_all(&file_dir).await?;
         let manager = SqliteConnectionManager::memory();
         let pool = Pool::new(manager)?;
+        {
+            let conn = pool.get()?;
+            conn.execute_batch(db::SCHEMA)?;
+        }
         let (tx, _rx) = broadcast::channel(100);
         let auth_file = config.data_dir.join("auth.json");
         let auth = if let Ok(bytes) = tokio::fs::read(&auth_file).await {
@@ -69,6 +75,7 @@ impl AppState {
             auth: std::sync::Arc::new(tokio::sync::Mutex::new(auth)),
             auth_file,
             login_limiter: auth::LoginRateLimiter::new(5, std::time::Duration::from_secs(60)),
+            ws_members: std::sync::Arc::new(Mutex::new(HashMap::new())),
         })
     }
 }
@@ -78,6 +85,8 @@ pub fn build_router(state: AppState) -> Router {
     let protected = Router::new()
         .route("/api/files", post(upload_file))
         .route("/api/files/:id", get(download_file))
+        .route("/api/rooms", get(list_rooms).post(create_room))
+        .route("/api/dm/:user_id", get(get_dm))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             auth_middleware,
@@ -518,14 +527,96 @@ async fn download_file(
     Ok((headers, body))
 }
 
+#[derive(Deserialize)]
+struct CreateRoomReq {
+    name: String,
+    slug: Option<String>,
+}
+
+async fn create_room(
+    State(state): State<AppState>,
+    Extension(_user): Extension<auth::User>,
+    Json(req): Json<CreateRoomReq>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResp>)> {
+    if req.name.trim().is_empty() {
+        return Err(err(StatusCode::BAD_REQUEST, "invalid_name"));
+    }
+    let conn = state
+        .pool
+        .get()
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    match rooms::create_public_room(&conn, &req.name, req.slug.as_deref()) {
+        Ok(room) => Ok((StatusCode::OK, Json(room))),
+        Err(e) if e.to_string() == "duplicate_slug" => {
+            Err(err(StatusCode::CONFLICT, "duplicate_slug"))
+        }
+        Err(_) => Err(err(StatusCode::INTERNAL_SERVER_ERROR, "db")),
+    }
+}
+
+#[derive(Serialize)]
+struct RoomWithUnread {
+    #[serde(flatten)]
+    room: rooms::Room,
+    unread_count: i64,
+}
+
+async fn list_rooms(
+    State(state): State<AppState>,
+    Extension(user): Extension<auth::User>,
+) -> Result<Json<Vec<RoomWithUnread>>, (StatusCode, Json<ErrorResp>)> {
+    let conn = state
+        .pool
+        .get()
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    let rooms = rooms::list_rooms_for_user(&conn, user.id)
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    Ok(Json(
+        rooms
+            .into_iter()
+            .map(|room| RoomWithUnread {
+                room,
+                unread_count: 0,
+            })
+            .collect(),
+    ))
+}
+
+async fn get_dm(
+    State(state): State<AppState>,
+    Extension(user): Extension<auth::User>,
+    Path(other_id): Path<u32>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResp>)> {
+    if user.id == other_id {
+        return Err(err(StatusCode::BAD_REQUEST, "self_dm"));
+    }
+    {
+        let guard = state.auth.lock().await;
+        let cfg = guard
+            .as_ref()
+            .ok_or(err(StatusCode::UNAUTHORIZED, "not_bootstrapped"))?;
+        if !cfg.users.iter().any(|u| u.id == other_id) {
+            return Err(err(StatusCode::NOT_FOUND, "user_not_found"));
+        }
+    }
+    let conn = state
+        .pool
+        .get()
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    let room = rooms::get_or_create_dm_room(&conn, user.id, other_id)
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    Ok((StatusCode::OK, Json(room)))
+}
+
 async fn ws_handler(
     ws: WebSocketUpgrade,
     State(state): State<AppState>,
+    Extension(user): Extension<auth::User>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    Ok(ws.on_upgrade(move |socket| handle_socket(socket, state)))
+    Ok(ws.on_upgrade(move |socket| handle_socket(socket, state, user)))
 }
 
-async fn handle_socket(stream: WebSocket, state: AppState) {
+async fn handle_socket(stream: WebSocket, state: AppState, user: auth::User) {
     let (mut sender, mut receiver) = stream.split();
     let mut rx = BroadcastStream::new(state.event_tx.subscribe());
     let _ = sender.send(Message::Text("hello".into())).await;
@@ -533,7 +624,36 @@ async fn handle_socket(stream: WebSocket, state: AppState) {
         tokio::select! {
             _ = rx.next() => {},
             Some(Ok(msg)) = receiver.next() => {
-                if matches!(msg, Message::Close(_)) { break; }
+                match msg {
+                    Message::Text(t) => {
+                        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&t) {
+                            if v.get("action").and_then(|a| a.as_str()) == Some("join") {
+                                if let Some(id_str) = v.get("room_id").and_then(|r| r.as_str()) {
+                                    if let Ok(room_id) = Uuid::parse_str(id_str) {
+                                        let allowed = {
+                                            state
+                                                .pool
+                                                .get()
+                                                .ok()
+                                                .and_then(|conn| rooms::user_can_access_room(&conn, &room_id, user.id).ok())
+                                                .unwrap_or(false)
+                                        };
+                                        if allowed {
+                                            {
+                                                let mut guard = state.ws_members.lock();
+                                                guard.entry(room_id).or_default().insert(user.id);
+                                            }
+                                            let _ = sender.send(Message::Text("joined".into())).await;
+                                            continue;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Message::Close(_) => break,
+                    _ => {}
+                }
             },
             else => break,
         }
