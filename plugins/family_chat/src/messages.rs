@@ -27,7 +27,7 @@ pub fn create_message(
             "SELECT id, room_id, author_id, text_md, created_at, edited_at FROM messages WHERE author_id = ?1 AND idempotency_key = ?2",
         )?;
         if let Some(existing) = stmt
-            .query_row(params![author_id.to_string(), key], |row| row_to_msg(row))
+            .query_row(params![author_id.to_string(), key], row_to_msg)
             .optional()?
         {
             return Ok(existing);
@@ -91,7 +91,7 @@ pub fn list_messages(
     )?;
     let iter = stmt.query_map(
         params![room_id.to_string(), ts, id.to_string(), limit as i64],
-        |row| row_to_msg(row),
+        row_to_msg,
     )?;
     let mut msgs = Vec::new();
     for m in iter {
