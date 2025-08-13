@@ -9,9 +9,9 @@ use futures::{SinkExt, StreamExt};
 use hyper::Client;
 use std::net::{SocketAddr, TcpListener};
 use tokio::task::JoinHandle;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::{connect_async, tungstenite::Message as WsMessage};
 use uuid::Uuid;
-use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
 async fn spawn_server() -> (SocketAddr, JoinHandle<()>, AppState, tempfile::TempDir) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -528,13 +528,18 @@ async fn ws_join_registers_membership() {
 
     let url = format!("ws://{}/ws", addr);
     let mut req = url.into_client_request().unwrap();
-    req.headers_mut()
-        .append("Authorization", format!("Bearer {}", token).parse().unwrap());
+    req.headers_mut().append(
+        "Authorization",
+        format!("Bearer {}", token).parse().unwrap(),
+    );
     let (mut ws, _) = connect_async(req).await.unwrap();
     ws.next().await.unwrap().unwrap();
-    ws.send(WsMessage::Text(format!("{{\"action\":\"join\",\"room_id\":\"{}\"}}", room_id)))
-        .await
-        .unwrap();
+    ws.send(WsMessage::Text(format!(
+        "{{\"action\":\"join\",\"room_id\":\"{}\"}}",
+        room_id
+    )))
+    .await
+    .unwrap();
     ws.next().await.unwrap().unwrap();
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     assert!(state

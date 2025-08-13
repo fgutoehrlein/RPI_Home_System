@@ -21,11 +21,7 @@ pub fn sanitize_slug(input: &str) -> String {
 }
 
 /// Create a public room ensuring unique slug.
-pub fn create_public_room(
-    conn: &Connection,
-    name: &str,
-    slug_input: Option<&str>,
-) -> Result<Room> {
+pub fn create_public_room(conn: &Connection, name: &str, slug_input: Option<&str>) -> Result<Room> {
     let slug_src = slug_input.unwrap_or(name);
     let slug = sanitize_slug(slug_src);
     if slug.is_empty() {
@@ -38,9 +34,18 @@ pub fn create_public_room(
         params![id.to_string(), slug, name, now],
     );
     match res {
-        Ok(_) => Ok(Room { id, slug, name: name.into(), is_dm: false, created_at: now }),
+        Ok(_) => Ok(Room {
+            id,
+            slug,
+            name: name.into(),
+            is_dm: false,
+            created_at: now,
+        }),
         Err(e) => {
-            if matches!(e.sqlite_error_code(), Some(rusqlite::ErrorCode::ConstraintViolation)) {
+            if matches!(
+                e.sqlite_error_code(),
+                Some(rusqlite::ErrorCode::ConstraintViolation)
+            ) {
                 Err(anyhow!("duplicate_slug"))
             } else {
                 Err(e.into())
@@ -77,7 +82,13 @@ pub fn get_or_create_dm_room(conn: &Connection, a: u32, b: u32) -> Result<Room> 
         "INSERT INTO room_members (room_id, user_id) VALUES (?1, ?2)",
         params![id.to_string(), b],
     )?;
-    Ok(Room { id, slug, name: String::new(), is_dm: true, created_at: now })
+    Ok(Room {
+        id,
+        slug,
+        name: String::new(),
+        is_dm: true,
+        created_at: now,
+    })
 }
 
 fn get_room_by_id(conn: &Connection, id: &Uuid) -> Result<Option<Room>> {
@@ -126,9 +137,8 @@ pub fn user_can_access_room(conn: &Connection, room_id: &Uuid, user_id: u32) -> 
     if is_dm == 0 {
         return Ok(true);
     }
-    let mut stmt = conn.prepare(
-        "SELECT 1 FROM room_members WHERE room_id = ?1 AND user_id = ?2",
-    )?;
+    let mut stmt =
+        conn.prepare("SELECT 1 FROM room_members WHERE room_id = ?1 AND user_id = ?2")?;
     let exists: Option<i64> = stmt
         .query_row(params![room_id.to_string(), user_id], |row| row.get(0))
         .optional()?;
@@ -161,4 +171,3 @@ mod tests {
         assert_ne!(id1, id3);
     }
 }
-
