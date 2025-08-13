@@ -1,4 +1,5 @@
 use axum::http::{header, StatusCode};
+use base64::Engine;
 use family_chat::{
     api::{build_router, AppState},
     auth,
@@ -75,7 +76,93 @@ async fn serves_ui_and_spa_fallback() {
 async fn upload_download_and_auth() {
     let (addr, server, state, _tmp) = spawn_server().await;
     let client = reqwest::Client::new();
-    let token = auth::issue_jwt(&state.jwt_secret, "user", time::Duration::hours(1)).unwrap();
+
+    // bootstrap once
+    let body = serde_json::json!({
+        "passphrase": "supersecret",
+        "users": [
+            {"username": "admin", "admin": true},
+            {"username": "user", "admin": false}
+        ]
+    });
+    let resp = client
+        .post(format!("http://{}/api/bootstrap", addr))
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+    // second should conflict
+    let resp = client
+        .post(format!("http://{}/api/bootstrap", addr))
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CONFLICT);
+
+    // login success
+    let resp = client
+        .post(format!("http://{}/api/login", addr))
+        .json(&serde_json::json!({"username":"admin","passphrase":"supersecret"}))
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+    let v: serde_json::Value = resp.json().await.unwrap();
+    let token = v["token"].as_str().unwrap().to_string();
+
+    // login failure
+    let resp = client
+        .post(format!("http://{}/api/login", addr))
+        .json(&serde_json::json!({"username":"admin","passphrase":"wrong"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    let _ = resp.text().await;
+
+    // /api/me
+    let resp = client
+        .get(format!("http://{}/api/me", addr))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+    let resp = client
+        .get(format!("http://{}/api/me", addr))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    let _ = resp.text().await;
+    let resp = client
+        .get(format!("http://{}/api/me", addr))
+        .bearer_auth("bad")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    let _ = resp.text().await;
+
+    // token refresh
+    let secret = base64::engine::general_purpose::STANDARD
+        .decode(&state.auth.lock().await.as_ref().unwrap().jwt_secret)
+        .unwrap();
+    let short = auth::issue_jwt(&secret, "admin", time::Duration::seconds(1)).unwrap();
+    let resp = client
+        .post(format!("http://{}/api/token/refresh", addr))
+        .bearer_auth(&short)
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+    let refreshed: serde_json::Value = resp.json().await.unwrap();
+    let new_token = refreshed["token"].as_str().unwrap();
+    let old_claims = auth::verify_jwt(&secret, &short).unwrap();
+    let new_claims = auth::verify_jwt(&secret, new_token).unwrap();
+    assert!(new_claims.exp > old_claims.exp);
 
     // upload
     let form = reqwest::multipart::Form::new().part(
@@ -112,6 +199,7 @@ async fn upload_download_and_auth() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    let _ = resp.text().await;
 
     // websocket invalid token
     let url = format!("ws://{}/ws", addr);

@@ -7,7 +7,29 @@ use argon2::password_hash::{
 use argon2::Argon2;
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
+use std::{
+    collections::HashMap,
+    sync::Arc,
+    time::{Duration as StdDuration, Instant},
+};
 use time::{Duration, OffsetDateTime};
+use tokio::sync::Mutex;
+
+/// Representation of a user in the system.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct User {
+    pub username: String,
+    pub admin: bool,
+}
+
+/// Persistent authentication configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuthConfig {
+    pub passphrase_hash: String,
+    pub jwt_secret: String,
+    pub users: Vec<User>,
+    pub created_at: i64,
+}
 
 /// Hash a passphrase using argon2id.
 pub fn hash_passphrase(pass: &str) -> Result<String> {
@@ -32,7 +54,7 @@ pub fn verify_passphrase(pass: &str, hash: &str) -> bool {
 }
 
 /// Claims stored within issued JWTs.
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub struct Claims {
     pub sub: String,
     pub exp: usize,
@@ -64,9 +86,54 @@ pub fn verify_jwt(secret: &[u8], token: &str) -> Result<Claims> {
     Ok(data.claims)
 }
 
+/// Determine if a token should be refreshed given a threshold duration.
+pub fn needs_refresh(claims: &Claims, within: Duration) -> bool {
+    let expire = OffsetDateTime::from_unix_timestamp(claims.exp as i64).unwrap();
+    expire - OffsetDateTime::now_utc() < within
+}
+
+/// Simple in-memory login rate limiter.
+#[derive(Clone)]
+pub struct LoginRateLimiter {
+    inner: Arc<Mutex<HashMap<String, Vec<Instant>>>>,
+    max: usize,
+    window: StdDuration,
+}
+
+impl LoginRateLimiter {
+    pub fn new(max: usize, window: StdDuration) -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(HashMap::new())),
+            max,
+            window,
+        }
+    }
+
+    /// Returns true if the attempt is allowed, false if rate limited.
+    pub async fn check(&self, key: &str) -> bool {
+        let mut guard = self.inner.lock().await;
+        let now = Instant::now();
+        let entry = guard.entry(key.to_string()).or_default();
+        entry.retain(|t| now.duration_since(*t) < self.window);
+        if entry.len() >= self.max {
+            return false;
+        }
+        entry.push(now);
+        true
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration as StdDuration;
+
+    #[test]
+    fn hash_and_verify() {
+        let hash = hash_passphrase("secret").unwrap();
+        assert!(verify_passphrase("secret", &hash));
+        assert!(!verify_passphrase("bad", &hash));
+    }
 
     #[test]
     fn jwt_issue_and_verify() {
@@ -83,5 +150,24 @@ mod tests {
         // Validation should fail because exp is in the past
         let res = verify_jwt(secret, &token);
         assert!(res.is_err());
+    }
+
+    #[test]
+    fn refresh_logic() {
+        let now = OffsetDateTime::now_utc();
+        let claims = Claims {
+            sub: "a".into(),
+            exp: (now + Duration::minutes(5)).unix_timestamp() as usize,
+        };
+        assert!(needs_refresh(&claims, Duration::hours(1)));
+        assert!(!needs_refresh(&claims, Duration::minutes(1)));
+    }
+
+    #[tokio::test]
+    async fn rate_limiter_blocks() {
+        let limiter = LoginRateLimiter::new(2, StdDuration::from_secs(60));
+        assert!(limiter.check("u").await);
+        assert!(limiter.check("u").await);
+        assert!(!limiter.check("u").await);
     }
 }
