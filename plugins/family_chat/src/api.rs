@@ -1,9 +1,9 @@
-use crate::{auth, config::Config, db, embed::ui_router, files, rooms};
+use crate::{auth, config::Config, db, embed::ui_router, files, rooms, messages};
 use anyhow::Result;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::{
     body::StreamBody,
-    extract::{Extension, Multipart, Path, State},
+    extract::{Extension, Multipart, Path, Query, State},
     http::{header, HeaderMap, Request, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Response},
@@ -87,6 +87,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/files/:id", get(download_file))
         .route("/api/rooms", get(list_rooms).post(create_room))
         .route("/api/dm/:user_id", get(get_dm))
+        .route("/api/messages", post(post_message).get(list_messages))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             auth_middleware,
@@ -608,6 +609,84 @@ async fn get_dm(
     Ok((StatusCode::OK, Json(room)))
 }
 
+#[derive(Deserialize)]
+struct CreateMessageReq {
+    room_id: Uuid,
+    text_md: String,
+    #[serde(default)]
+    message_idempotency_key: Option<String>,
+}
+
+async fn post_message(
+    State(state): State<AppState>,
+    Extension(user): Extension<auth::User>,
+    Json(req): Json<CreateMessageReq>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResp>)> {
+    let conn = state
+        .pool
+        .get()
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    let allowed = rooms::user_can_access_room(&conn, &req.room_id, user.id)
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    if !allowed {
+        return Err(err(StatusCode::FORBIDDEN, "forbidden"));
+    }
+    let msg = messages::create_message(
+        &conn,
+        &req.room_id,
+        user.id,
+        &req.text_md,
+        req.message_idempotency_key.as_deref(),
+    )
+    .map_err(|e| match e.to_string().as_str() {
+        "empty_message" => err(StatusCode::BAD_REQUEST, "empty_message"),
+        _ => err(StatusCode::INTERNAL_SERVER_ERROR, "db"),
+    })?;
+    let _ = state.event_tx.send(
+        serde_json::json!({"t":"message","room_id":req.room_id,"message":msg}).to_string(),
+    );
+    Ok((StatusCode::CREATED, Json(msg)))
+}
+
+#[derive(Deserialize)]
+struct ListMessagesParams {
+    room_id: Uuid,
+    before: Option<String>,
+    limit: Option<usize>,
+}
+
+async fn list_messages(
+    State(state): State<AppState>,
+    Extension(user): Extension<auth::User>,
+    Query(params): Query<ListMessagesParams>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResp>)> {
+    let conn = state
+        .pool
+        .get()
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    let allowed = rooms::user_can_access_room(&conn, &params.room_id, user.id)
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    if !allowed {
+        return Err(err(StatusCode::FORBIDDEN, "forbidden"));
+    }
+    let limit = params.limit.unwrap_or(50).min(200);
+    let before = match params.before {
+        Some(ref b) => {
+            if let Ok(ts) = b.parse::<i64>() {
+                Some(messages::Cursor::Timestamp(ts))
+            } else if let Ok(id) = Uuid::parse_str(b) {
+                Some(messages::Cursor::Id(id))
+            } else {
+                None
+            }
+        }
+        None => None,
+    };
+    let msgs = messages::list_messages(&conn, &params.room_id, before, limit)
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    Ok(Json(msgs))
+}
+
 async fn ws_handler(
     ws: WebSocketUpgrade,
     State(state): State<AppState>,
@@ -622,7 +701,23 @@ async fn handle_socket(stream: WebSocket, state: AppState, user: auth::User) {
     let _ = sender.send(Message::Text("hello".into())).await;
     loop {
         tokio::select! {
-            _ = rx.next() => {},
+            Some(Ok(ev)) = rx.next() => {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&ev) {
+                    if let Some(rid_str) = v.get("room_id").and_then(|r| r.as_str()) {
+                        if let Ok(rid) = Uuid::parse_str(rid_str) {
+                            let allowed = state
+                                .ws_members
+                                .lock()
+                                .get(&rid)
+                                .map(|s| s.contains(&user.id))
+                                .unwrap_or(false);
+                            if allowed {
+                                let _ = sender.send(Message::Text(ev)).await;
+                            }
+                        }
+                    }
+                }
+            },
             Some(Ok(msg)) = receiver.next() => {
                 match msg {
                     Message::Text(t) => {

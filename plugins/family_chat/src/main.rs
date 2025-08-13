@@ -10,6 +10,7 @@ mod model;
 mod plugin;
 mod rooms;
 mod ws;
+mod messages;
 
 use anyhow::Result;
 use clap::Parser;
