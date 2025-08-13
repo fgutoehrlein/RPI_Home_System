@@ -67,6 +67,13 @@ CREATE TABLE IF NOT EXISTS reads (
   PRIMARY KEY (user_id, message_id)
 );
 
+CREATE TABLE IF NOT EXISTS read_pointers (
+  room_id TEXT NOT NULL REFERENCES rooms(id),
+  user_id INTEGER NOT NULL,
+  last_read_at INTEGER NOT NULL,
+  PRIMARY KEY (room_id, user_id)
+);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(text_md, content='messages', content_rowid='rowid');
 CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
   INSERT INTO messages_fts(rowid, text_md) VALUES (new.rowid, new.text_md);

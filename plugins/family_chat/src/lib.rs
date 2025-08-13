@@ -9,5 +9,8 @@ pub mod housekeeping;
 pub mod messages;
 pub mod model;
 pub mod plugin;
+pub mod presence;
+pub mod reads;
 pub mod rooms;
+pub mod typing;
 pub mod ws;
