@@ -28,6 +28,7 @@ pub struct FileMeta {
 
 #[derive(Clone)]
 pub struct AppState {
+    #[allow(dead_code)]
     pub pool: Pool<SqliteConnectionManager>,
     pub file_dir: PathBuf,
     pub jwt_secret: Vec<u8>,
@@ -115,7 +116,7 @@ async fn upload_file(
     mut multipart: Multipart,
 ) -> Result<impl IntoResponse, StatusCode> {
     let mut id = None;
-    while let Some(field) = multipart.next_field().await.unwrap_or(None) {
+    if let Some(field) = multipart.next_field().await.unwrap_or(None) {
         let name = field
             .file_name()
             .map(|s| s.to_string())
@@ -134,7 +135,6 @@ async fn upload_file(
             .lock()
             .insert(file_id.clone(), FileMeta { mime, name });
         id = Some(file_id);
-        break;
     }
     if let Some(file_id) = id {
         Ok((StatusCode::OK, axum::Json(UploadResp { file_id })))
@@ -163,6 +163,10 @@ async fn download_file(
     headers.insert(
         header::CONTENT_TYPE,
         header::HeaderValue::from_str(&meta.mime).unwrap(),
+    );
+    headers.insert(
+        header::CONTENT_DISPOSITION,
+        header::HeaderValue::from_str(&format!("attachment; filename=\"{}\"", meta.name)).unwrap(),
     );
     Ok((headers, body))
 }

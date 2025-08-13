@@ -5,6 +5,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use uuid::Uuid;
 
 /// Abstraction over the communication bridge to the core.
+#[allow(dead_code)]
 pub trait CoreBridge: Send + Sync {
     fn emit(&self, _event: &str) {}
 }
