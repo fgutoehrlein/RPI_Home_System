@@ -11,6 +11,7 @@ pub trait CoreBridge: Send + Sync {
 }
 
 /// A no-op bridge used when running the server standalone or in tests.
+#[allow(dead_code)]
 #[derive(Clone, Default)]
 pub struct NullCoreBridge;
 
