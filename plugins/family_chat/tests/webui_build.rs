@@ -24,4 +24,3 @@ fn webui_assets_build() {
 
     assert!(out_dir.join("index.html").exists(), "no build output");
 }
-
