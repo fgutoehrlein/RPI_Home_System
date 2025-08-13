@@ -8,6 +8,7 @@ mod files;
 mod housekeeping;
 mod model;
 mod plugin;
+mod rooms;
 mod ws;
 
 use anyhow::Result;

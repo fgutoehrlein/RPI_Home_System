@@ -8,4 +8,5 @@ pub mod files;
 pub mod housekeeping;
 pub mod model;
 pub mod plugin;
+pub mod rooms;
 pub mod ws;

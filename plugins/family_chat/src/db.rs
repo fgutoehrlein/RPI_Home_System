@@ -11,7 +11,7 @@ pub fn init_db<P: AsRef<Path>>(path: P) -> Result<Connection> {
     Ok(conn)
 }
 
-const SCHEMA: &str = r#"
+pub const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   username TEXT UNIQUE NOT NULL,
@@ -30,7 +30,14 @@ CREATE TABLE IF NOT EXISTS rooms (
   id TEXT PRIMARY KEY,
   slug TEXT UNIQUE NOT NULL,
   name TEXT NOT NULL,
-  is_dm INTEGER NOT NULL DEFAULT 0
+  is_dm INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS room_members (
+  room_id TEXT NOT NULL REFERENCES rooms(id),
+  user_id INTEGER NOT NULL,
+  PRIMARY KEY (room_id, user_id)
 );
 
 CREATE TABLE IF NOT EXISTS messages (
