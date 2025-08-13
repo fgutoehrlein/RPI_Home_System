@@ -7,7 +7,7 @@ assets under `webui/dist` which are embedded at build time.
 ## Building
 
 Before compiling the plugin you need the web UI assets under `webui/dist`.
-Generate them with:
+Ensure you are using Node.js 18 or newer. Generate the assets with:
 
 ```
 cd plugins/family_chat/webui
