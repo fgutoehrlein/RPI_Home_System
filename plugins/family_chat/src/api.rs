@@ -4,10 +4,10 @@ use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::{
     body::StreamBody,
     extract::{Extension, Multipart, Path, State},
-    http::{header, HeaderMap, StatusCode},
+    http::{header, HeaderMap, Request, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{get, patch, post},
     Json, Router,
 };
 use base64::engine::general_purpose::STANDARD;
@@ -17,11 +17,16 @@ use parking_lot::Mutex;
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, net::SocketAddr, path::PathBuf};
+use std::{
+    collections::{HashMap, HashSet},
+    net::SocketAddr,
+    path::PathBuf,
+};
 use time::{Duration, OffsetDateTime};
 use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_util::io::ReaderStream;
+use url::Url;
 
 #[derive(Clone)]
 pub struct FileMeta {
@@ -87,6 +92,14 @@ pub fn build_router(state: AppState) -> Router {
             state.clone(),
             auth_middleware,
         ));
+    let admin = Router::new()
+        .route("/api/admin/users", get(list_users).post(create_user))
+        .route("/api/admin/users/:id", patch(update_user))
+        .layer(middleware::from_fn(admin_only))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth_middleware,
+        ));
     let ws_route =
         Router::new()
             .route("/ws", get(ws_handler))
@@ -102,6 +115,7 @@ pub fn build_router(state: AppState) -> Router {
         .merge(protected)
         .merge(ws_route)
         .merge(auth_only)
+        .merge(admin)
         .merge(ui)
         .with_state(state)
 }
@@ -112,28 +126,50 @@ async fn health() -> &'static str {
 
 async fn auth_middleware<B>(
     State(state): State<AppState>,
-    mut req: axum::http::Request<B>,
+    mut req: Request<B>,
     next: Next<B>,
 ) -> Result<Response, StatusCode> {
     if let Some(value) = req.headers().get(header::AUTHORIZATION) {
         if let Ok(value) = value.to_str() {
             if let Some(token) = value.strip_prefix("Bearer ") {
-                let secret = {
+                let (secret, users) = {
                     let guard = state.auth.lock().await;
-                    guard.as_ref().map(|c| c.jwt_secret.clone())
+                    guard
+                        .as_ref()
+                        .map(|c| (c.jwt_secret.clone(), c.users.clone()))
+                        .unwrap_or_default()
                 };
-                if let Some(secret) = secret {
+                if !secret.is_empty() {
                     if let Ok(claims) =
                         auth::verify_jwt(&STANDARD.decode(&secret).unwrap_or_default(), token)
                     {
-                        req.extensions_mut().insert(claims);
-                        return Ok(next.run(req).await);
+                        if let Some(user) = users
+                            .into_iter()
+                            .find(|u| u.username.eq_ignore_ascii_case(&claims.sub) && !u.disabled)
+                        {
+                            req.extensions_mut().insert(claims);
+                            req.extensions_mut().insert(user);
+                            return Ok(next.run(req).await);
+                        }
                     }
                 }
             }
         }
     }
     Err(StatusCode::UNAUTHORIZED)
+}
+
+async fn admin_only<B>(req: Request<B>, next: Next<B>) -> Result<Response, StatusCode> {
+    if req
+        .extensions()
+        .get::<auth::User>()
+        .map(|u| u.admin)
+        .unwrap_or(false)
+    {
+        Ok(next.run(req).await)
+    } else {
+        Err(StatusCode::FORBIDDEN)
+    }
 }
 
 #[derive(Serialize)]
@@ -145,10 +181,48 @@ fn err(status: StatusCode, msg: &str) -> (StatusCode, Json<ErrorResp>) {
     (status, Json(ErrorResp { error: msg.into() }))
 }
 
+fn sanitize_avatar(url: Option<String>) -> Result<Option<String>, (StatusCode, Json<ErrorResp>)> {
+    if let Some(u) = url {
+        let parsed = Url::parse(&u).map_err(|_| err(StatusCode::BAD_REQUEST, "invalid_avatar"))?;
+        match parsed.scheme() {
+            "http" | "https" => Ok(Some(parsed.to_string())),
+            _ => Err(err(StatusCode::BAD_REQUEST, "invalid_avatar")),
+        }
+    } else {
+        Ok(None)
+    }
+}
+
+async fn save_auth(
+    state: &AppState,
+    cfg: &auth::AuthConfig,
+) -> Result<(), (StatusCode, Json<ErrorResp>)> {
+    let bytes =
+        serde_json::to_vec(cfg).map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "serialize"))?;
+    if let Some(dir) = state.auth_file.parent() {
+        tokio::fs::create_dir_all(dir)
+            .await
+            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "persist"))?;
+    }
+    tokio::fs::write(&state.auth_file, bytes)
+        .await
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "persist"))?;
+    Ok(())
+}
+
+#[derive(Deserialize)]
+struct BootstrapUser {
+    username: String,
+    display_name: String,
+    admin: bool,
+    #[serde(default)]
+    avatar_url: Option<String>,
+}
+
 #[derive(Deserialize)]
 struct BootstrapReq {
     passphrase: String,
-    users: Vec<auth::User>,
+    users: Vec<BootstrapUser>,
 }
 
 async fn bootstrap(
@@ -172,22 +246,35 @@ async fn bootstrap(
     use rand::RngCore;
     let mut secret = vec![0u8; 32];
     rand::thread_rng().fill_bytes(&mut secret);
+    let mut users_vec = Vec::new();
+    let mut seen = HashSet::new();
+    let mut next_id = 1u32;
+    for u in req.users {
+        if u.display_name.trim().is_empty() || u.username.trim().is_empty() {
+            return Err(err(StatusCode::BAD_REQUEST, "invalid_user"));
+        }
+        let username = u.username.to_lowercase();
+        if !seen.insert(username.clone()) {
+            return Err(err(StatusCode::BAD_REQUEST, "duplicate_username"));
+        }
+        let avatar = sanitize_avatar(u.avatar_url)?;
+        users_vec.push(auth::User {
+            id: next_id,
+            username,
+            display_name: u.display_name,
+            admin: u.admin,
+            disabled: false,
+            avatar_url: avatar,
+        });
+        next_id += 1;
+    }
     let cfg = auth::AuthConfig {
         passphrase_hash: hash,
         jwt_secret: STANDARD.encode(&secret),
-        users: req.users,
+        users: users_vec,
         created_at: OffsetDateTime::now_utc().unix_timestamp(),
     };
-    let bytes = serde_json::to_vec(&cfg)
-        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "serialize"))?;
-    if let Some(dir) = state.auth_file.parent() {
-        if tokio::fs::create_dir_all(dir).await.is_err() {
-            return Err(err(StatusCode::INTERNAL_SERVER_ERROR, "persist"));
-        }
-    }
-    tokio::fs::write(&state.auth_file, bytes)
-        .await
-        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "persist"))?;
+    save_auth(&state, &cfg).await?;
     *guard = Some(cfg);
     Ok(StatusCode::OK)
 }
@@ -221,45 +308,149 @@ async fn login(
     let user = cfg
         .users
         .iter()
-        .find(|u| u.username == req.username)
+        .find(|u| u.username.eq_ignore_ascii_case(&req.username))
         .cloned()
         .ok_or(err(StatusCode::UNAUTHORIZED, "invalid_credentials"))?;
+    if user.disabled {
+        return Err(err(StatusCode::UNAUTHORIZED, "disabled"));
+    }
     let secret = STANDARD.decode(&cfg.jwt_secret).unwrap_or_default();
     let token = auth::issue_jwt(&secret, &user.username, Duration::hours(24))
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "token"))?;
     Ok((StatusCode::OK, Json(LoginResp { token, user })))
 }
 
-async fn me(
-    State(state): State<AppState>,
-    Extension(claims): Extension<auth::Claims>,
-) -> Result<impl IntoResponse, StatusCode> {
-    let guard = state.auth.lock().await;
-    if let Some(cfg) = guard.as_ref() {
-        if let Some(user) = cfg.users.iter().find(|u| u.username == claims.sub) {
-            return Ok(Json(user.clone()));
-        }
-    }
-    Err(StatusCode::UNAUTHORIZED)
+async fn me(Extension(user): Extension<auth::User>) -> Result<impl IntoResponse, StatusCode> {
+    Ok(Json(user))
 }
 
 async fn refresh_token(
     State(state): State<AppState>,
-    Extension(claims): Extension<auth::Claims>,
+    Extension(user): Extension<auth::User>,
 ) -> Result<impl IntoResponse, StatusCode> {
     let guard = state.auth.lock().await;
     if let Some(cfg) = guard.as_ref() {
-        if let Some(user) = cfg.users.iter().find(|u| u.username == claims.sub) {
-            let secret = STANDARD.decode(&cfg.jwt_secret).unwrap_or_default();
-            let token = auth::issue_jwt(&secret, &user.username, Duration::hours(24))
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-            return Ok(Json(LoginResp {
-                token,
-                user: user.clone(),
-            }));
-        }
+        let secret = STANDARD.decode(&cfg.jwt_secret).unwrap_or_default();
+        let token = auth::issue_jwt(&secret, &user.username, Duration::hours(24))
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        return Ok(Json(LoginResp { token, user }));
     }
     Err(StatusCode::UNAUTHORIZED)
+}
+
+#[derive(Serialize)]
+struct UserResp {
+    id: u32,
+    username: String,
+    display_name: String,
+    disabled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    avatar_url: Option<String>,
+}
+
+impl From<auth::User> for UserResp {
+    fn from(u: auth::User) -> Self {
+        Self {
+            id: u.id,
+            username: u.username,
+            display_name: u.display_name,
+            disabled: u.disabled,
+            avatar_url: u.avatar_url,
+        }
+    }
+}
+
+async fn list_users(State(state): State<AppState>) -> Result<impl IntoResponse, StatusCode> {
+    let guard = state.auth.lock().await;
+    if let Some(cfg) = guard.as_ref() {
+        let users: Vec<UserResp> = cfg.users.clone().into_iter().map(Into::into).collect();
+        Ok(Json(users))
+    } else {
+        Err(StatusCode::UNAUTHORIZED)
+    }
+}
+
+#[derive(Deserialize)]
+struct CreateUserReq {
+    username: String,
+    display_name: String,
+    #[serde(default)]
+    avatar_url: Option<String>,
+}
+
+async fn create_user(
+    State(state): State<AppState>,
+    Json(req): Json<CreateUserReq>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResp>)> {
+    if req.display_name.trim().is_empty() || req.username.trim().is_empty() {
+        return Err(err(StatusCode::BAD_REQUEST, "invalid_user"));
+    }
+    let avatar = sanitize_avatar(req.avatar_url)?;
+    let mut guard = state.auth.lock().await;
+    let cfg = guard
+        .as_mut()
+        .ok_or(err(StatusCode::UNAUTHORIZED, "not_bootstrapped"))?;
+    let username = req.username.to_lowercase();
+    let user = auth::User {
+        id: cfg.next_id(),
+        username,
+        display_name: req.display_name,
+        admin: false,
+        disabled: false,
+        avatar_url: avatar,
+    };
+    cfg.add_user(user.clone())
+        .map_err(|_| err(StatusCode::CONFLICT, "username_taken"))?;
+    let cfg_clone = cfg.clone();
+    drop(guard);
+    save_auth(&state, &cfg_clone).await?;
+    Ok((StatusCode::CREATED, Json(UserResp::from(user))))
+}
+
+#[derive(Deserialize)]
+struct UpdateUserReq {
+    #[serde(default)]
+    display_name: Option<String>,
+    #[serde(default)]
+    avatar_url: Option<String>,
+    #[serde(default)]
+    disabled: Option<bool>,
+}
+
+async fn update_user(
+    State(state): State<AppState>,
+    Path(id): Path<u32>,
+    Json(req): Json<UpdateUserReq>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResp>)> {
+    if let Some(ref dn) = req.display_name {
+        if dn.trim().is_empty() {
+            return Err(err(StatusCode::BAD_REQUEST, "invalid_user"));
+        }
+    }
+    let avatar = sanitize_avatar(req.avatar_url)?;
+    let mut guard = state.auth.lock().await;
+    let cfg = guard
+        .as_mut()
+        .ok_or(err(StatusCode::UNAUTHORIZED, "not_bootstrapped"))?;
+    let user = cfg
+        .users
+        .iter_mut()
+        .find(|u| u.id == id)
+        .ok_or(err(StatusCode::NOT_FOUND, "not_found"))?;
+    if let Some(dn) = req.display_name {
+        user.display_name = dn;
+    }
+    if let Some(dis) = req.disabled {
+        user.disabled = dis;
+    }
+    if avatar.is_some() {
+        user.avatar_url = avatar;
+    }
+    let updated = user.clone();
+    let cfg_clone = cfg.clone();
+    drop(guard);
+    save_auth(&state, &cfg_clone).await?;
+    Ok(Json(UserResp::from(updated)))
 }
 
 #[derive(Serialize)]

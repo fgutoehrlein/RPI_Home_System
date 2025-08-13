@@ -18,8 +18,14 @@ use tokio::sync::Mutex;
 /// Representation of a user in the system.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct User {
+    pub id: u32,
     pub username: String,
+    pub display_name: String,
     pub admin: bool,
+    #[serde(default)]
+    pub disabled: bool,
+    #[serde(default)]
+    pub avatar_url: Option<String>,
 }
 
 /// Persistent authentication configuration.
@@ -29,6 +35,33 @@ pub struct AuthConfig {
     pub jwt_secret: String,
     pub users: Vec<User>,
     pub created_at: i64,
+}
+
+impl AuthConfig {
+    /// Get next user id.
+    pub fn next_id(&self) -> u32 {
+        self.users.iter().map(|u| u.id).max().unwrap_or(0) + 1
+    }
+
+    /// Add a user ensuring unique username (case-insensitive).
+    pub fn add_user(&mut self, user: User) -> Result<()> {
+        if self
+            .users
+            .iter()
+            .any(|u| u.username.eq_ignore_ascii_case(&user.username))
+        {
+            anyhow::bail!("duplicate_user");
+        }
+        self.users.push(user);
+        Ok(())
+    }
+
+    /// Check if username has admin role.
+    pub fn is_admin(&self, username: &str) -> bool {
+        self.users
+            .iter()
+            .any(|u| u.username.eq_ignore_ascii_case(username) && u.admin)
+    }
 }
 
 /// Hash a passphrase using argon2id.
@@ -169,5 +202,53 @@ mod tests {
         assert!(limiter.check("u").await);
         assert!(limiter.check("u").await);
         assert!(!limiter.check("u").await);
+    }
+
+    #[test]
+    fn unique_username_case_insensitive() {
+        let mut cfg = AuthConfig {
+            passphrase_hash: String::new(),
+            jwt_secret: String::new(),
+            users: Vec::new(),
+            created_at: 0,
+        };
+        cfg.add_user(User {
+            id: 1,
+            username: "Alice".into(),
+            display_name: "Alice".into(),
+            admin: false,
+            disabled: false,
+            avatar_url: None,
+        })
+        .unwrap();
+        assert!(cfg
+            .add_user(User {
+                id: 2,
+                username: "alice".into(),
+                display_name: "Another".into(),
+                admin: false,
+                disabled: false,
+                avatar_url: None,
+            })
+            .is_err());
+    }
+
+    #[test]
+    fn admin_role_check() {
+        let cfg = AuthConfig {
+            passphrase_hash: String::new(),
+            jwt_secret: String::new(),
+            users: vec![User {
+                id: 1,
+                username: "admin".into(),
+                display_name: "Admin".into(),
+                admin: true,
+                disabled: false,
+                avatar_url: None,
+            }],
+            created_at: 0,
+        };
+        assert!(cfg.is_admin("admin"));
+        assert!(!cfg.is_admin("user"));
     }
 }

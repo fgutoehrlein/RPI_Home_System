@@ -81,8 +81,8 @@ async fn upload_download_and_auth() {
     let body = serde_json::json!({
         "passphrase": "supersecret",
         "users": [
-            {"username": "admin", "admin": true},
-            {"username": "user", "admin": false}
+            {"username": "admin", "display_name": "Admin", "admin": true},
+            {"username": "user", "display_name": "User", "admin": false}
         ]
     });
     let resp = client
@@ -217,6 +217,139 @@ async fn upload_download_and_auth() {
     let (mut ws, _) = connect_async(req).await.unwrap();
     let msg = ws.next().await.unwrap().unwrap();
     assert_eq!(msg.into_text().unwrap(), "hello");
+
+    server.abort();
+}
+
+#[tokio::test]
+async fn admin_user_management() {
+    let (addr, server, _state, _tmp) = spawn_server().await;
+    let client = reqwest::Client::new();
+
+    // bootstrap
+    let body = serde_json::json!({
+        "passphrase": "supersecret",
+        "users": [
+            {"username": "admin", "display_name": "Admin", "admin": true},
+            {"username": "user", "display_name": "User", "admin": false}
+        ]
+    });
+    let resp = client
+        .post(format!("http://{}/api/bootstrap", addr))
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+
+    // login tokens
+    let admin_token = client
+        .post(format!("http://{}/api/login", addr))
+        .json(&serde_json::json!({"username":"admin","passphrase":"supersecret"}))
+        .send()
+        .await
+        .unwrap()
+        .json::<serde_json::Value>()
+        .await
+        .unwrap()["token"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let user_token = client
+        .post(format!("http://{}/api/login", addr))
+        .json(&serde_json::json!({"username":"user","passphrase":"supersecret"}))
+        .send()
+        .await
+        .unwrap()
+        .json::<serde_json::Value>()
+        .await
+        .unwrap()["token"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // admin list users
+    let resp = client
+        .get(format!("http://{}/api/admin/users", addr))
+        .bearer_auth(&admin_token)
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+    let users: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(users.as_array().unwrap().len(), 2);
+
+    // normal user forbidden
+    let resp = client
+        .get(format!("http://{}/api/admin/users", addr))
+        .bearer_auth(&user_token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+
+    // create new user
+    let resp = client
+        .post(format!("http://{}/api/admin/users", addr))
+        .bearer_auth(&admin_token)
+        .json(&serde_json::json!({"username":"new","display_name":"New"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let created: serde_json::Value = resp.json().await.unwrap();
+    let new_id = created["id"].as_u64().unwrap();
+
+    // duplicate username
+    let resp = client
+        .post(format!("http://{}/api/admin/users", addr))
+        .bearer_auth(&admin_token)
+        .json(&serde_json::json!({"username":"NEW","display_name":"Dup"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CONFLICT);
+
+    // login as new user
+    let new_token = client
+        .post(format!("http://{}/api/login", addr))
+        .json(&serde_json::json!({"username":"new","passphrase":"supersecret"}))
+        .send()
+        .await
+        .unwrap()
+        .json::<serde_json::Value>()
+        .await
+        .unwrap()["token"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // disable user
+    let resp = client
+        .patch(format!("http://{}/api/admin/users/{}", addr, new_id))
+        .bearer_auth(&admin_token)
+        .json(&serde_json::json!({"disabled": true}))
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+
+    // disabled user cannot access
+    let resp = client
+        .get(format!("http://{}/api/me", addr))
+        .bearer_auth(&new_token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    // disabled user cannot login
+    let resp = client
+        .post(format!("http://{}/api/login", addr))
+        .json(&serde_json::json!({"username":"new","passphrase":"supersecret"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 
     server.abort();
 }
