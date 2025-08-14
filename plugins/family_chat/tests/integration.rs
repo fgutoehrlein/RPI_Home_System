@@ -181,6 +181,33 @@ async fn upload_download_and_auth() {
     let v: serde_json::Value = resp.json().await.unwrap();
     let id = v["file_id"].as_str().unwrap().to_string();
 
+    // thumbnail generation on image upload
+    let img = image::RgbImage::from_pixel(1, 1, image::Rgb([0, 0, 0]));
+    let mut img_data = Vec::new();
+    {
+        let mut cursor = std::io::Cursor::new(&mut img_data);
+        img.write_to(&mut cursor, image::ImageOutputFormat::Png)
+            .unwrap();
+    }
+    let form = reqwest::multipart::Form::new().part(
+        "file",
+        reqwest::multipart::Part::bytes(img_data.clone())
+            .file_name("dot.png")
+            .mime_str("image/png")
+            .unwrap(),
+    );
+    let resp = client
+        .post(format!("http://{}/api/files", addr))
+        .bearer_auth(&token)
+        .multipart(form)
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+    let v: serde_json::Value = resp.json().await.unwrap();
+    let img_id = v["file_id"].as_str().unwrap().to_string();
+    assert!(state.files.lock().get(&img_id).unwrap().thumb.is_some());
+
     // download
     let resp = client
         .get(format!("http://{}/api/files/{}", addr, id))
@@ -193,6 +220,18 @@ async fn upload_download_and_auth() {
     let body = resp.text().await.unwrap();
     assert_eq!(body, "hello world");
 
+    // range request
+    let resp = client
+        .get(format!("http://{}/api/files/{}", addr, id))
+        .bearer_auth(&token)
+        .header("Range", "bytes=0-4")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::PARTIAL_CONTENT);
+    let body = resp.text().await.unwrap();
+    assert_eq!(body, "hello");
+
     // unauthorized
     let resp = client
         .post(format!("http://{}/api/files", addr))
@@ -201,6 +240,26 @@ async fn upload_download_and_auth() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
     let _ = resp.text().await;
+
+    // rate limit
+    for i in 0..2 {
+        let form = reqwest::multipart::Form::new().part(
+            "file",
+            reqwest::multipart::Part::bytes(format!("{}", i).into_bytes()).file_name("a.txt"),
+        );
+        let resp = client
+            .post(format!("http://{}/api/files", addr))
+            .bearer_auth(&token)
+            .multipart(form)
+            .send()
+            .await
+            .unwrap();
+        if i < 1 {
+            assert!(resp.status().is_success());
+        } else {
+            assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
+        }
+    }
 
     // websocket invalid token
     let url = format!("ws://{}/ws", addr);

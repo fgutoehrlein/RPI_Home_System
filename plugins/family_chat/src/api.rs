@@ -14,6 +14,8 @@ use axum::{
 };
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
+use bytes::Bytes;
+use futures::stream::BoxStream;
 use futures::{SinkExt, StreamExt};
 use parking_lot::Mutex;
 use r2d2::Pool;
@@ -23,6 +25,7 @@ use std::{
     collections::{HashMap, HashSet},
     net::SocketAddr,
     path::PathBuf,
+    time::Instant,
 };
 use time::{Duration, OffsetDateTime};
 use tokio::sync::broadcast;
@@ -35,6 +38,17 @@ use uuid::Uuid;
 pub struct FileMeta {
     pub mime: String,
     pub name: String,
+    #[allow(dead_code)]
+    pub thumb: Option<ThumbMeta>,
+}
+
+#[derive(Clone)]
+#[allow(dead_code)]
+pub struct ThumbMeta {
+    pub id: String,
+    pub mime: String,
+    pub width: u32,
+    pub height: u32,
 }
 
 #[derive(Clone)]
@@ -43,6 +57,7 @@ pub struct AppState {
     pub pool: Pool<SqliteConnectionManager>,
     pub file_dir: PathBuf,
     pub files: std::sync::Arc<Mutex<HashMap<String, FileMeta>>>,
+    pub upload_limits: std::sync::Arc<Mutex<HashMap<u32, (u32, Instant)>>>,
     pub event_tx: broadcast::Sender<String>,
     pub config: Config,
     pub auth: std::sync::Arc<tokio::sync::Mutex<Option<auth::AuthConfig>>>,
@@ -74,6 +89,7 @@ impl AppState {
             pool,
             file_dir,
             files: std::sync::Arc::new(Mutex::new(HashMap::new())),
+            upload_limits: std::sync::Arc::new(Mutex::new(HashMap::new())),
             event_tx: tx,
             config,
             auth: std::sync::Arc::new(tokio::sync::Mutex::new(auth)),
@@ -87,6 +103,23 @@ impl AppState {
                 std::time::Duration::from_secs(2),
             )),
         })
+    }
+
+    pub fn check_upload_limit(&self, user: u32) -> bool {
+        const BURST: u32 = 3;
+        const REFILL: std::time::Duration = std::time::Duration::from_secs(60);
+        let mut map = self.upload_limits.lock();
+        let entry = map.entry(user).or_insert((BURST, Instant::now()));
+        let now = Instant::now();
+        if now.duration_since(entry.1) >= REFILL {
+            entry.0 = BURST;
+            entry.1 = now;
+        }
+        if entry.0 == 0 {
+            return false;
+        }
+        entry.0 -= 1;
+        true
     }
 }
 
@@ -486,27 +519,42 @@ struct UploadResp {
 
 async fn upload_file(
     State(state): State<AppState>,
+    Extension(user): Extension<auth::User>,
     mut multipart: Multipart,
 ) -> Result<impl IntoResponse, StatusCode> {
+    if !state.check_upload_limit(user.id) {
+        return Err(StatusCode::TOO_MANY_REQUESTS);
+    }
     let mut id = None;
     if let Some(field) = multipart.next_field().await.unwrap_or(None) {
-        let name = field
+        let name_raw = field
             .file_name()
             .map(|s| s.to_string())
             .unwrap_or_else(|| "file".into());
-        let mime = field
-            .content_type()
-            .map(|m| m.to_string())
-            .or_else(|| mime_guess::from_path(&name).first().map(|m| m.to_string()))
-            .unwrap_or_else(|| "application/octet-stream".into());
+        let name = files::sanitize_filename(&name_raw);
         let data = field.bytes().await.map_err(|_| StatusCode::BAD_REQUEST)?;
-        let file_id = files::save_file(&state.file_dir, data)
+        let mime = files::detect_mime(&name, &data);
+        if !files::allowed_mime(&mime) {
+            return Err(StatusCode::UNSUPPORTED_MEDIA_TYPE);
+        }
+        let file_id = files::save_file(&state.file_dir, data.clone())
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let mut thumb = None;
+        if let Ok(Some((thumb_bytes, w, h))) = files::generate_thumbnail(&data) {
+            if let Ok(tid) = files::save_file(&state.file_dir, Bytes::from(thumb_bytes)).await {
+                thumb = Some(ThumbMeta {
+                    id: tid,
+                    mime: "image/png".into(),
+                    width: w,
+                    height: h,
+                });
+            }
+        }
         state
             .files
             .lock()
-            .insert(file_id.clone(), FileMeta { mime, name });
+            .insert(file_id.clone(), FileMeta { mime, name, thumb });
         id = Some(file_id);
     }
     if let Some(file_id) = id {
@@ -516,9 +564,34 @@ async fn upload_file(
     }
 }
 
+struct ByteRange {
+    start: u64,
+    end: u64,
+    len: u64,
+}
+
+fn parse_range(header: &str, size: u64) -> Option<ByteRange> {
+    let header = header.strip_prefix("bytes=")?;
+    let mut parts = header.split('-');
+    let start: u64 = parts.next()?.parse().ok()?;
+    let end: u64 = parts
+        .next()
+        .and_then(|s| if s.is_empty() { None } else { s.parse().ok() })
+        .unwrap_or(size - 1);
+    if start > end || end >= size {
+        return None;
+    }
+    Some(ByteRange {
+        start,
+        end,
+        len: end - start + 1,
+    })
+}
+
 async fn download_file(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    headers: HeaderMap,
 ) -> Result<impl IntoResponse, StatusCode> {
     let meta = state
         .files
@@ -527,21 +600,56 @@ async fn download_file(
         .cloned()
         .ok_or(StatusCode::NOT_FOUND)?;
     let path = files::file_path(&state.file_dir, &id);
-    let file = tokio::fs::File::open(path)
+    let mut file = tokio::fs::File::open(path)
         .await
         .map_err(|_| StatusCode::NOT_FOUND)?;
-    let stream = ReaderStream::new(file);
-    let body = StreamBody::new(stream);
-    let mut headers = HeaderMap::new();
-    headers.insert(
+    let size = file
+        .metadata()
+        .await
+        .map_err(|_| StatusCode::NOT_FOUND)?
+        .len();
+    let stream: BoxStream<'static, Result<Bytes, std::io::Error>>;
+    let mut status = StatusCode::OK;
+    let mut resp_headers = HeaderMap::new();
+    if let Some(range) = headers.get(header::RANGE) {
+        if let Ok(range) = range.to_str() {
+            if let Some(r) = parse_range(range, size) {
+                use tokio::io::{AsyncReadExt, AsyncSeekExt};
+                file.seek(std::io::SeekFrom::Start(r.start))
+                    .await
+                    .map_err(|_| StatusCode::RANGE_NOT_SATISFIABLE)?;
+                stream = Box::pin(ReaderStream::new(file.take(r.len)));
+                status = StatusCode::PARTIAL_CONTENT;
+                resp_headers.insert(
+                    header::CONTENT_RANGE,
+                    format!("bytes {}-{}/{}", r.start, r.end, size)
+                        .parse()
+                        .unwrap(),
+                );
+                resp_headers.insert(header::ACCEPT_RANGES, "bytes".parse().unwrap());
+            } else {
+                stream = Box::pin(ReaderStream::new(file));
+            }
+        } else {
+            stream = Box::pin(ReaderStream::new(file));
+        }
+    } else {
+        stream = Box::pin(ReaderStream::new(file));
+    }
+    resp_headers.insert(
         header::CONTENT_TYPE,
         header::HeaderValue::from_str(&meta.mime).unwrap(),
     );
-    headers.insert(
+    resp_headers.insert(
         header::CONTENT_DISPOSITION,
-        header::HeaderValue::from_str(&format!("attachment; filename=\"{}\"", meta.name)).unwrap(),
+        header::HeaderValue::from_str(&format!("inline; filename=\"{}\"", meta.name)).unwrap(),
     );
-    Ok((headers, body))
+    resp_headers.insert(
+        header::CACHE_CONTROL,
+        header::HeaderValue::from_static("public, max-age=31536000, immutable"),
+    );
+    let body = StreamBody::new(stream);
+    Ok((status, resp_headers, body))
 }
 
 #[derive(Deserialize)]
