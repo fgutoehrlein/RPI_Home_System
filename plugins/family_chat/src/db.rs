@@ -47,9 +47,35 @@ CREATE TABLE IF NOT EXISTS messages (
   text_md TEXT NOT NULL,
   created_at INTEGER NOT NULL,
   edited_at INTEGER,
+  reply_to TEXT REFERENCES messages(id),
   idempotency_key TEXT,
   UNIQUE(author_id, idempotency_key)
 );
+
+CREATE TABLE IF NOT EXISTS message_mentions (
+  message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  PRIMARY KEY (message_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS reactions (
+  message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  emoji TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (message_id, user_id, emoji)
+);
+
+CREATE TABLE IF NOT EXISTS pins (
+  message_id TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+  room_id TEXT NOT NULL,
+  pinned_by TEXT NOT NULL REFERENCES users(id),
+  pinned_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_messages_room_created ON messages(room_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_messages_author ON messages(author_id);
+CREATE INDEX IF NOT EXISTS idx_mentions_user ON message_mentions(user_id);
 
 CREATE TABLE IF NOT EXISTS attachments (
   id TEXT PRIMARY KEY,

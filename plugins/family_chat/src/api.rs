@@ -98,6 +98,11 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/rooms", get(list_rooms).post(create_room))
         .route("/api/dm/:user_id", get(get_dm))
         .route("/api/messages", post(post_message).get(list_messages))
+        .route(
+            "/api/messages/:id",
+            patch(edit_message).delete(delete_message),
+        )
+        .route("/api/search", get(search_messages))
         .route("/api/read_pointer", post(update_read_pointer))
         .layer(middleware::from_fn_with_state(
             state.clone(),
@@ -668,6 +673,8 @@ struct CreateMessageReq {
     room_id: Uuid,
     text_md: String,
     #[serde(default)]
+    reply_to: Option<Uuid>,
+    #[serde(default)]
     message_idempotency_key: Option<String>,
 }
 
@@ -690,6 +697,7 @@ async fn post_message(
         &req.room_id,
         user.id,
         &req.text_md,
+        req.reply_to.as_ref(),
         req.message_idempotency_key.as_deref(),
     )
     .map_err(|e| match e.to_string().as_str() {
@@ -757,6 +765,73 @@ async fn list_messages(
     let msgs = messages::list_messages(&conn, &params.room_id, before, limit)
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
     Ok(Json(msgs))
+}
+
+#[derive(Deserialize)]
+struct EditMessageReq {
+    text_md: String,
+}
+
+async fn edit_message(
+    Path(id): Path<Uuid>,
+    State(state): State<AppState>,
+    Extension(user): Extension<auth::User>,
+    Json(req): Json<EditMessageReq>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResp>)> {
+    let conn = state
+        .pool
+        .get()
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    let msg = messages::edit_message(&conn, &id, user.id, &req.text_md).map_err(|e| {
+        match e.to_string().as_str() {
+            "empty_message" => err(StatusCode::BAD_REQUEST, "empty_message"),
+            _ => err(StatusCode::INTERNAL_SERVER_ERROR, "db"),
+        }
+    })?;
+    let _ = state.event_tx.send(
+        serde_json::json!({"t":"message_edit","room_id":msg.room_id,"message":msg}).to_string(),
+    );
+    Ok(Json(msg))
+}
+
+async fn delete_message(
+    Path(id): Path<Uuid>,
+    State(state): State<AppState>,
+    Extension(user): Extension<auth::User>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResp>)> {
+    let conn = state
+        .pool
+        .get()
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    let room_id = messages::delete_message(&conn, &id, user.id).map_err(|e| {
+        match e.to_string().as_str() {
+            "forbidden" => err(StatusCode::FORBIDDEN, "forbidden"),
+            _ => err(StatusCode::INTERNAL_SERVER_ERROR, "db"),
+        }
+    })?;
+    let _ = state.event_tx.send(
+        serde_json::json!({"t":"message_delete","room_id":room_id,"message_id":id}).to_string(),
+    );
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct SearchParams {
+    q: String,
+    room_id: Option<Uuid>,
+}
+
+async fn search_messages(
+    State(state): State<AppState>,
+    Query(params): Query<SearchParams>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResp>)> {
+    let conn = state
+        .pool
+        .get()
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    let res = messages::search_messages(&conn, &params.q, params.room_id.as_ref())
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    Ok(Json(res))
 }
 
 async fn ws_handler(

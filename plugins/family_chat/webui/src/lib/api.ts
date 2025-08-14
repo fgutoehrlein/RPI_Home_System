@@ -49,11 +49,20 @@ export const api = {
     if (before) params.append('before', before);
     return request<Message[]>(`/api/messages?${params.toString()}`);
   },
-  sendMessage(payload: { room_id: string; text_md: string; attachments?: any[] }) {
+  sendMessage(payload: { room_id: string; text_md: string; reply_to?: string; attachments?: any[] }) {
     return request<Message>('/api/messages', {
       method: 'POST',
       body: JSON.stringify(payload),
     });
+  },
+  editMessage(id: string, text_md: string) {
+    return request<Message>(`/api/messages/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ text_md }),
+    });
+  },
+  deleteMessage(id: string) {
+    return request<void>(`/api/messages/${id}`, { method: 'DELETE' });
   },
   uploadFile(file: File) {
     const form = new FormData();
