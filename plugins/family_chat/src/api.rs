@@ -38,10 +38,12 @@ use uuid::Uuid;
 pub struct FileMeta {
     pub mime: String,
     pub name: String,
+    #[allow(dead_code)]
     pub thumb: Option<ThumbMeta>,
 }
 
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct ThumbMeta {
     pub id: String,
     pub mime: String,
