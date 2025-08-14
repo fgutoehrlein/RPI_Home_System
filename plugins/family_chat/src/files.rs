@@ -23,12 +23,7 @@ pub fn detect_mime(name: &str, data: &[u8]) -> String {
 
 /// Simple allowlist for safe MIME types.
 pub fn allowed_mime(mime: &str) -> bool {
-    const ALLOWED: &[&str] = &[
-        "text/plain",
-        "image/png",
-        "image/jpeg",
-        "application/pdf",
-    ];
+    const ALLOWED: &[&str] = &["text/plain", "image/png", "image/jpeg", "application/pdf"];
     ALLOWED.iter().any(|m| m.eq_ignore_ascii_case(mime))
 }
 

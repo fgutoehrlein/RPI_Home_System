@@ -186,7 +186,8 @@ async fn upload_download_and_auth() {
     let mut img_data = Vec::new();
     {
         let mut cursor = std::io::Cursor::new(&mut img_data);
-        img.write_to(&mut cursor, image::ImageOutputFormat::Png).unwrap();
+        img.write_to(&mut cursor, image::ImageOutputFormat::Png)
+            .unwrap();
     }
     let form = reqwest::multipart::Form::new().part(
         "file",
@@ -244,8 +245,7 @@ async fn upload_download_and_auth() {
     for i in 0..2 {
         let form = reqwest::multipart::Form::new().part(
             "file",
-            reqwest::multipart::Part::bytes(format!("{}", i).into_bytes())
-                .file_name("a.txt"),
+            reqwest::multipart::Part::bytes(format!("{}", i).into_bytes()).file_name("a.txt"),
         );
         let resp = client
             .post(format!("http://{}/api/files", addr))

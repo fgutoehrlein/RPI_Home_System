@@ -14,10 +14,10 @@ use axum::{
 };
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
-use futures::{SinkExt, StreamExt};
-use futures::stream::BoxStream;
-use parking_lot::Mutex;
 use bytes::Bytes;
+use futures::stream::BoxStream;
+use futures::{SinkExt, StreamExt};
+use parking_lot::Mutex;
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use serde::{Deserialize, Serialize};
@@ -601,7 +601,11 @@ async fn download_file(
     let mut file = tokio::fs::File::open(path)
         .await
         .map_err(|_| StatusCode::NOT_FOUND)?;
-    let size = file.metadata().await.map_err(|_| StatusCode::NOT_FOUND)?.len();
+    let size = file
+        .metadata()
+        .await
+        .map_err(|_| StatusCode::NOT_FOUND)?
+        .len();
     let stream: BoxStream<'static, Result<Bytes, std::io::Error>>;
     let mut status = StatusCode::OK;
     let mut resp_headers = HeaderMap::new();
