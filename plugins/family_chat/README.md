@@ -12,6 +12,7 @@ Ensure you are using Node.js 18 or newer. Generate the assets with:
 ```
 cd plugins/family_chat/webui
 npm ci
+npm test
 npm run build
 ```
 
@@ -35,3 +36,12 @@ cargo run -p family_chat -- --stdio
 ```
 
 Once running, open <http://localhost:8787> in a browser to view the chat UI.
+
+## Testing
+
+Run the backend and frontend test suites:
+
+```
+cargo test -p family_chat
+cd plugins/family_chat/webui && npm test
+```

@@ -6,7 +6,7 @@ use family_chat::{
     config::Config,
 };
 use futures::{SinkExt, StreamExt};
-use hyper::Client;
+use hyper::{body::to_bytes, Client};
 use std::net::{SocketAddr, TcpListener};
 use tokio::task::JoinHandle;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
@@ -49,9 +49,16 @@ async fn serves_ui_and_spa_fallback() {
         resp.headers().get(header::CONTENT_TYPE).unwrap(),
         "text/html; charset=utf-8"
     );
+    let bytes = to_bytes(resp.into_body()).await.unwrap();
+    let index_html = String::from_utf8(bytes.to_vec()).unwrap();
+    let asset_name = index_html
+        .split("/assets/")
+        .nth(1)
+        .and_then(|s| s.split('"').next())
+        .unwrap();
 
     // asset
-    let uri = format!("http://{}/assets/app-12345678.js", addr)
+    let uri = format!("http://{}/assets/{}", addr, asset_name)
         .parse()
         .unwrap();
     let resp = client.get(uri).await.unwrap();
