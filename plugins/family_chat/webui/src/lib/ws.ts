@@ -2,6 +2,8 @@ export type WSEvent =
   | { t: 'presence'; user_id: string; state: string }
   | { t: 'typing'; room_id: string; user_id: string }
   | { t: 'message'; room_id: string; message: any }
+  | { t: 'message_edit'; room_id: string; message: any }
+  | { t: 'message_delete'; room_id: string; message_id: string }
   | { t: 'read'; room_id: string; user_id: string; message_id: string };
 
 export function connect(token: string, onEvent: (e: WSEvent) => void) {

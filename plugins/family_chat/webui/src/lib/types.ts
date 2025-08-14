@@ -27,6 +27,7 @@ export interface Message {
   created_at: string;
   attachments?: Attachment[];
   read_by?: string[];
+  reply_to?: string;
 }
 
 export interface AuthMe {

@@ -50,8 +50,8 @@ mod tests {
             params![room_id.to_string()],
         )
         .unwrap();
-        let _m1 = messages::create_message(&conn, &room_id, 1, "m1", None).unwrap();
-        let m2 = messages::create_message(&conn, &room_id, 2, "m2", None).unwrap();
+        let _m1 = messages::create_message(&conn, &room_id, 1, "m1", None, None).unwrap();
+        let m2 = messages::create_message(&conn, &room_id, 2, "m2", None, None).unwrap();
         assert_eq!(unread_count(&conn, 1, &room_id).unwrap(), 1);
         set_read_pointer(&conn, 1, &room_id, m2.created_at).unwrap();
         assert_eq!(unread_count(&conn, 1, &room_id).unwrap(), 0);

@@ -143,12 +143,25 @@ async fn message_flow_and_pagination() {
                 .send()
                 .await
                 .unwrap()
+                .json::<serde_json::Value>()
+                .await
+                .unwrap()
         }
     };
-    let resp = post_msg("one").await;
-    assert_eq!(resp.status(), StatusCode::CREATED);
-    let _m1: serde_json::Value = resp.json().await.unwrap();
-    let _evt = ws.next().await.unwrap().unwrap();
+    let m1 = post_msg("one").await;
+    let id1 = m1["id"].as_str().unwrap().to_string();
+    // consume events until we get message event
+    loop {
+        if let Some(msg) = ws.next().await {
+            let msg = msg.unwrap();
+            if let WsMessage::Text(t) = msg {
+                let v: serde_json::Value = serde_json::from_str(&t).unwrap();
+                if v["t"] == "message" {
+                    break;
+                }
+            }
+        }
+    }
 
     // ensure persisted
     let count: i64 = state
@@ -159,12 +172,33 @@ async fn message_flow_and_pagination() {
         .unwrap();
     assert_eq!(count, 1);
 
-    let resp = post_msg("two").await;
-    let _m2: serde_json::Value = resp.json().await.unwrap();
-    ws.next().await.unwrap().unwrap();
-    let resp = post_msg("three").await;
-    let _m3: serde_json::Value = resp.json().await.unwrap();
-    ws.next().await.unwrap().unwrap();
+    let m2 = post_msg("two").await;
+    let id2 = m2["id"].as_str().unwrap().to_string();
+    // drain to next message event
+    loop {
+        if let Some(msg) = ws.next().await {
+            let msg = msg.unwrap();
+            if let WsMessage::Text(t) = msg {
+                let v: serde_json::Value = serde_json::from_str(&t).unwrap();
+                if v["t"] == "message" {
+                    break;
+                }
+            }
+        }
+    }
+    let _m3 = post_msg("three").await;
+    // drain again for message event
+    loop {
+        if let Some(msg) = ws.next().await {
+            let msg = msg.unwrap();
+            if let WsMessage::Text(t) = msg {
+                let v: serde_json::Value = serde_json::from_str(&t).unwrap();
+                if v["t"] == "message" {
+                    break;
+                }
+            }
+        }
+    }
 
     // pagination
     let all: Vec<serde_json::Value> = client
@@ -210,6 +244,75 @@ async fn message_flow_and_pagination() {
     let mut combined = page1.clone();
     combined.extend(page2.clone());
     assert_eq!(combined, all);
+
+    // edit first message
+    let edited: serde_json::Value = client
+        .patch(format!("http://{}/api/messages/{}", addr, id1))
+        .bearer_auth(&alice_token)
+        .json(&serde_json::json!({"text_md":"one edited"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(edited["text_md"], "one edited");
+    // wait for edit event
+    loop {
+        if let Some(msg) = ws.next().await {
+            let msg = msg.unwrap();
+            if let WsMessage::Text(t) = msg {
+                let v: serde_json::Value = serde_json::from_str(&t).unwrap();
+                if v["t"] == "message_edit" {
+                    assert_eq!(v["message"]["id"], id1);
+                    break;
+                }
+            }
+        }
+    }
+
+    // search for edited text
+    let search_res: Vec<serde_json::Value> = client
+        .get(format!("http://{}/api/search?q=edited", addr))
+        .bearer_auth(&alice_token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(search_res.len(), 1);
+
+    // delete second message
+    client
+        .delete(format!("http://{}/api/messages/{}", addr, id2))
+        .bearer_auth(&alice_token)
+        .send()
+        .await
+        .unwrap();
+    // wait for delete event
+    loop {
+        if let Some(msg) = ws.next().await {
+            let msg = msg.unwrap();
+            if let WsMessage::Text(t) = msg {
+                let v: serde_json::Value = serde_json::from_str(&t).unwrap();
+                if v["t"] == "message_delete" {
+                    assert_eq!(v["message_id"], id2);
+                    break;
+                }
+            }
+        }
+    }
+    let search_res: Vec<serde_json::Value> = client
+        .get(format!("http://{}/api/search?q=two", addr))
+        .bearer_auth(&alice_token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(search_res.len(), 0);
 
     // unauthorized post by charlie
     let resp = client

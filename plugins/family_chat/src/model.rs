@@ -26,6 +26,8 @@ pub struct Message {
     pub text_md: String,
     pub created_at: i64,
     pub edited_at: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply_to: Option<Uuid>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -36,4 +38,10 @@ pub struct Attachment {
     pub file_name: String,
     pub mime: Option<String>,
     pub size_bytes: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SearchResult {
+    pub message: Message,
+    pub highlights: Vec<String>,
 }
