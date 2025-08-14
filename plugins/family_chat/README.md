@@ -1,8 +1,24 @@
 # Family Chat Plugin
 
-This plugin now ships a small React-based web UI that is embedded into the
-Rust binary. The UI is built with Vite and TypeScript and compiled to static
-assets under `webui/dist` which are embedded at build time.
+A real-time chat service for HomeCore. It exposes a JSON/HTTP API and a
+WebSocket endpoint backed by an embedded SQLite database and ships a
+React/Vite web UI that is embedded into the binary at compile time.
+
+## Features
+
+* Multiple rooms and direct messages
+* Presence, typing indicators and read receipts
+* File uploads stored under a configurable data directory
+* Full text search over messages
+* Runs standalone over HTTP or as a plugin via the HomeCore stdio protocol
+
+## Configuration
+
+The server reads the following environment variables:
+
+* `BIND` – address to bind the HTTP server (default `0.0.0.0:8787`)
+* `DATA_DIR` – directory for the SQLite database and uploaded files
+* `MAX_UPLOAD_MB` – maximum upload size in megabytes (default `5`)
 
 ## Building
 
@@ -45,3 +61,4 @@ Run the backend and frontend test suites:
 cargo test -p family_chat
 cd plugins/family_chat/webui && npm test
 ```
+
