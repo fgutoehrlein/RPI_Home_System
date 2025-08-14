@@ -1,0 +1,8 @@
+{
+  "name": "family-chat-plugin",
+  "private": true,
+  "scripts": {
+    "build": "npm --prefix webui ci && npm --prefix webui run build",
+    "test": "npm --prefix webui test"
+  }
+}
