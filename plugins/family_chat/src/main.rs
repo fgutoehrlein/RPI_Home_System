@@ -9,7 +9,10 @@ mod housekeeping;
 mod messages;
 mod model;
 mod plugin;
+mod presence;
+mod reads;
 mod rooms;
+mod typing;
 mod ws;
 
 use anyhow::Result;
