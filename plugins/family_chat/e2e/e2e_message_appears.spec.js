@@ -24,12 +24,12 @@ test.beforeAll(async () => {
   port = 18787 + Math.floor(Math.random() * 1000);
   dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fc-data-'));
   const bin = path.resolve(__dirname, '../../../target/release/family_chat');
-  proc = spawn(bin, [], {
-    env: { ...process.env, BIND: `127.0.0.1:${port}`, DATA_DIR: dataDir, RUST_LOG: 'off' },
+  proc = spawn(bin, ['--bind', `127.0.0.1:${port}`], {
+    env: { ...process.env, DATA_DIR: dataDir, RUST_LOG: 'off' },
     stdio: 'inherit',
   });
 
-  await waitForServer(`http://127.0.0.1:${port}/`);
+  await waitForServer(`http://127.0.0.1:${port}/api/health`);
 
   await fetch(`http://127.0.0.1:${port}/api/bootstrap`, {
     method: 'POST',
