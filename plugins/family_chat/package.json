@@ -4,5 +4,9 @@
   "scripts": {
     "build": "npm --prefix webui ci && npm --prefix webui run build",
     "test": "npm --prefix webui test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.54.2",
+    "playwright": "^1.54.2"
   }
 }
