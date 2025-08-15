@@ -12,6 +12,17 @@ Build the entire workspace:
 cargo build --workspace
 ```
 
+To build the `family_chat` web UI assets used by the plugin:
+
+```
+cd plugins/family_chat/webui
+npm ci
+npm test
+npm run build
+cd ../../..
+cargo build -p family_chat
+```
+
 ## Running the core
 
 Start the core and load plugins from the `plugins/` directory:
