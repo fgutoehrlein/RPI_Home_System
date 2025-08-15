@@ -11,6 +11,7 @@ React/Vite web UI that is embedded into the binary at compile time.
 * File uploads stored under a configurable data directory
 * Full text search over messages
 * Runs standalone over HTTP or as a plugin via the HomeCore stdio protocol
+* Built-in Swagger UI for API exploration at `/swagger`
 
 ## Configuration
 
@@ -53,6 +54,7 @@ cargo run -p family_chat -- --stdio
 ```
 
 Once running, open <http://localhost:8787> in a browser to view the chat UI.
+API documentation is available at <http://localhost:8787/swagger>.
 
 ## Testing
 

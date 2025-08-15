@@ -16,6 +16,8 @@ tower = "0.4"
 tokio-stream = { version = "0.1", features = ["sync"] }
 tokio-tungstenite = "0.20"
 hyper = { version = "0.14", features = ["full"] }
+utoipa = { version = "3", features = ["axum_extras"] }
+utoipa-swagger-ui = { version = "3.1", features = ["axum"] }
 rusqlite = { version = "0.30", features = ["bundled"] }
 r2d2 = "0.8"
 r2d2_sqlite = "0.23"
