@@ -9,12 +9,37 @@ export default function Chat() {
   const [messages, setMessages] = useState<Message[]>([]);
 
   useEffect(() => {
-    api.getMessages('1').then(setMessages).catch(console.error);
+    api
+      .getMessages('1')
+      .then((msgs) => {
+        setMessages((existing) => {
+          const ids = new Set(existing.map((m) => m.id));
+          const merged = [...existing];
+          for (const msg of msgs) {
+            if (!ids.has(msg.id)) merged.push(msg);
+          }
+          return merged;
+        });
+      })
+      .catch(console.error);
   }, []);
 
   async function send(text: string) {
-    const msg = await api.sendMessage({ room_id: '1', text_md: text });
-    setMessages((m) => [...m, msg]);
+    const temp: Message = {
+      id: `tmp-${Date.now()}`,
+      room_id: '1',
+      text_md: text,
+      created_at: new Date().toISOString(),
+      user: { id: 'me', username: 'me', display_name: 'Me' },
+    } as Message;
+    setMessages((m) => [...m, temp]);
+    try {
+      const msg = await api.sendMessage({ room_id: '1', text_md: text });
+      setMessages((m) => m.map((x) => (x.id === temp.id ? msg : x)));
+    } catch (e) {
+      setMessages((m) => m.filter((x) => x.id !== temp.id));
+      console.error(e);
+    }
   }
 
   return (

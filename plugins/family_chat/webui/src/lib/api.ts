@@ -44,6 +44,12 @@ export const api = {
   listRooms() {
     return request<Room[]>('/api/rooms');
   },
+  createRoom(name: string) {
+    return request<Room>('/api/rooms', {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    });
+  },
   getMessages(roomId: string, before?: string, limit = 50) {
     const params = new URLSearchParams({ room_id: roomId, limit: String(limit) });
     if (before) params.append('before', before);

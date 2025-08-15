@@ -23,6 +23,7 @@ The server reads the following environment variables:
 ## Building
 
 Before compiling the plugin you need the web UI assets under `webui/dist`.
+The `dist` directory is not committed to git and must be generated locally. The build will fail with a clear error if the directory is missing.
 Ensure you are using Node.js 18 or newer. Generate the assets with:
 
 ```
