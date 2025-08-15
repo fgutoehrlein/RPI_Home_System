@@ -32,9 +32,9 @@ use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_util::io::ReaderStream;
 use url::Url;
-use uuid::Uuid;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
+use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct FileMeta {
@@ -175,8 +175,9 @@ pub fn build_router(state: AppState) -> Router {
                 state.clone(),
                 auth_middleware,
             ));
-    let swagger: Router<AppState> =
-        SwaggerUi::new("/swagger").url("/api-doc/openapi.json", ApiDoc::openapi()).into();
+    let swagger: Router<AppState> = SwaggerUi::new("/swagger")
+        .url("/api-doc/openapi.json", ApiDoc::openapi())
+        .into();
     let ui: Router<AppState> = ui_router().with_state(());
     Router::new()
         .merge(swagger)
