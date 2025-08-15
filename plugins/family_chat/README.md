@@ -14,11 +14,28 @@ React/Vite web UI that is embedded into the binary at compile time.
 
 ## Configuration
 
-The server reads the following environment variables:
+Family Chat reads configuration from a file, environment variables and CLI flags
+with the following precedence:
 
-* `BIND` – address to bind the HTTP server (default `0.0.0.0:8787`)
+`CLI` > `ENV` > `config file` > built-in defaults.
+
+The default config file location is `config/family_chat.toml`. Override with the
+`--config` flag or the `FAMILY_CHAT_CONFIG` environment variable. A sample file
+is provided at `config/family_chat.example.toml`.
+
+Supported settings:
+
+* `bootstrap.username` / `bootstrap.password` – on first run, create this admin
+  account. **The default `admin`/`admin` credentials are for local development
+  only.**
+* `server.port` – port to bind the HTTP/WS server (default `8787`). Host may be
+  overridden with `--bind` or the `BIND` env variable.
+* `logging.enabled` – when `false`, only warnings and errors are logged.
 * `DATA_DIR` – directory for the SQLite database and uploaded files
 * `MAX_UPLOAD_MB` – maximum upload size in megabytes (default `5`)
+
+Environment variables `FAMILY_CHAT_PORT` and `FAMILY_CHAT_LOGGING` may override
+the port and logging settings respectively.
 
 ## Building
 

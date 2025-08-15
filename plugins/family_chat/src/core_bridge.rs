@@ -1,3 +1,4 @@
+use crate::config::Config;
 use anyhow::Result;
 use plugin_api::{Envelope, Kind, Metadata};
 use serde_json::json;
@@ -18,7 +19,7 @@ pub struct NullCoreBridge;
 impl CoreBridge for NullCoreBridge {}
 
 /// Run the stdio protocol handshake with the core and then start the HTTP server.
-pub async fn run_stdio(bind: &str) -> Result<()> {
+pub async fn run_stdio(config: Config) -> Result<()> {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
     let mut reader = BufReader::new(stdin);
@@ -65,9 +66,9 @@ pub async fn run_stdio(bind: &str) -> Result<()> {
     let _ = read(&mut reader).await?; // response
 
     // spawn HTTP server
-    let bind = bind.to_string();
+    let cfg = config.clone();
     tokio::spawn(async move {
-        let _ = crate::api::run_http_server(bind).await;
+        let _ = crate::api::run_http_server(cfg).await;
     });
 
     // event loop; respond to plugin.stop and then exit
