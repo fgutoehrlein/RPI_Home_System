@@ -20,6 +20,7 @@ use futures::{SinkExt, StreamExt};
 use parking_lot::Mutex;
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
+use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
@@ -82,11 +83,39 @@ impl AppState {
         }
         let (tx, _rx) = broadcast::channel(100);
         let auth_file = config.data_dir.join("auth.json");
-        let auth = if let Ok(bytes) = tokio::fs::read(&auth_file).await {
+        let mut auth = if let Ok(bytes) = tokio::fs::read(&auth_file).await {
             serde_json::from_slice(&bytes).ok()
         } else {
             None
         };
+        if auth.is_none() {
+            if let Some(bs) = &config.bootstrap {
+                let hash =
+                    auth::hash_passphrase(&bs.password).map_err(|_| anyhow::anyhow!("hash"))?;
+                let mut secret = vec![0u8; 32];
+                rand::thread_rng().fill_bytes(&mut secret);
+                let user = auth::User {
+                    id: 1,
+                    username: bs.username.to_lowercase(),
+                    display_name: bs.username.clone(),
+                    admin: true,
+                    disabled: false,
+                    avatar_url: None,
+                    must_change_password: true,
+                };
+                let cfg = auth::AuthConfig {
+                    passphrase_hash: hash,
+                    jwt_secret: STANDARD.encode(&secret),
+                    users: vec![user],
+                    created_at: OffsetDateTime::now_utc().unix_timestamp(),
+                };
+                if let Some(dir) = auth_file.parent() {
+                    tokio::fs::create_dir_all(dir).await?;
+                }
+                tokio::fs::write(&auth_file, serde_json::to_vec(&cfg)?).await?;
+                auth = Some(cfg);
+            }
+        }
         Ok(Self {
             pool,
             file_dir,
@@ -342,6 +371,7 @@ async fn bootstrap(
             admin: u.admin,
             disabled: false,
             avatar_url: avatar,
+            must_change_password: false,
         });
         next_id += 1;
     }
@@ -475,6 +505,7 @@ async fn create_user(
         admin: false,
         disabled: false,
         avatar_url: avatar,
+        must_change_password: false,
     };
     cfg.add_user(user.clone())
         .map_err(|_| err(StatusCode::CONFLICT, "username_taken"))?;
@@ -1072,11 +1103,9 @@ async fn handle_socket(stream: WebSocket, state: AppState, user: auth::User) {
 }
 
 /// Run the HTTP server bound to the provided address.
-pub async fn run_http_server(bind: String) -> Result<()> {
-    let mut config = Config::from_env();
-    config.bind = bind.clone();
+pub async fn run_http_server(config: Config) -> Result<()> {
+    let addr: SocketAddr = config.bind.parse()?;
     let state = AppState::new(config).await?;
-    let addr: SocketAddr = bind.parse()?;
     axum::Server::bind(&addr)
         .serve(build_router(state).into_make_service())
         .await?;

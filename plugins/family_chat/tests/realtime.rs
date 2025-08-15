@@ -17,6 +17,8 @@ async fn spawn_server() -> (SocketAddr, JoinHandle<()>, AppState, tempfile::Temp
         bind: addr.to_string(),
         data_dir: tmp.path().to_path_buf(),
         max_upload_mb: 5,
+        logging_enabled: true,
+        bootstrap: None,
     };
     let state = AppState::new(config).await.unwrap();
     let app = build_router(state.clone());

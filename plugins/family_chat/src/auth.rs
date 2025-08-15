@@ -26,6 +26,8 @@ pub struct User {
     pub disabled: bool,
     #[serde(default)]
     pub avatar_url: Option<String>,
+    #[serde(default)]
+    pub must_change_password: bool,
 }
 
 /// Persistent authentication configuration.
@@ -219,6 +221,7 @@ mod tests {
             admin: false,
             disabled: false,
             avatar_url: None,
+            must_change_password: false,
         })
         .unwrap();
         assert!(cfg
@@ -229,6 +232,7 @@ mod tests {
                 admin: false,
                 disabled: false,
                 avatar_url: None,
+                must_change_password: false,
             })
             .is_err());
     }
@@ -245,6 +249,7 @@ mod tests {
                 admin: true,
                 disabled: false,
                 avatar_url: None,
+                must_change_password: false,
             }],
             created_at: 0,
         };

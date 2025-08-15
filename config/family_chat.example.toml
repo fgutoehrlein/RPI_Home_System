@@ -1,0 +1,11 @@
+# Sample configuration for Family Chat
+
+[bootstrap]
+# username = "admin"
+# password = "admin"
+
+[server]
+# port = 8787
+
+[logging]
+# enabled = true
