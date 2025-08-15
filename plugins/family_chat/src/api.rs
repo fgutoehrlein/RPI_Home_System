@@ -33,6 +33,8 @@ use tokio_stream::wrappers::BroadcastStream;
 use tokio_util::io::ReaderStream;
 use url::Url;
 use uuid::Uuid;
+use utoipa::OpenApi;
+use utoipa_swagger_ui::SwaggerUi;
 
 #[derive(Clone)]
 pub struct FileMeta {
@@ -123,6 +125,13 @@ impl AppState {
     }
 }
 
+#[derive(OpenApi)]
+#[openapi(
+    paths(health),
+    tags((name = "family_chat", description = "Family Chat API"))
+)]
+struct ApiDoc;
+
 /// Build the HTTP application router.
 pub fn build_router(state: AppState) -> Router {
     let protected = Router::new()
@@ -166,8 +175,12 @@ pub fn build_router(state: AppState) -> Router {
                 state.clone(),
                 auth_middleware,
             ));
+    let swagger: Router<AppState> =
+        SwaggerUi::new("/swagger").url("/api-doc/openapi.json", ApiDoc::openapi()).into();
     let ui: Router<AppState> = ui_router().with_state(());
     Router::new()
+        .merge(swagger)
+        .merge(ui)
         .route("/api/health", get(health))
         .route("/api/bootstrap", post(bootstrap))
         .route("/api/login", post(login))
@@ -175,10 +188,14 @@ pub fn build_router(state: AppState) -> Router {
         .merge(ws_route)
         .merge(auth_only)
         .merge(admin)
-        .merge(ui)
         .with_state(state)
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/health",
+    responses((status = 200, description = "Health check"))
+)]
 async fn health() -> &'static str {
     "ok"
 }
