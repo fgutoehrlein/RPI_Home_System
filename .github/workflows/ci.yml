@@ -39,10 +39,13 @@ jobs:
         with:
           name: native-binaries
           path: target/release/
-      - name: Install cross
-        run: cargo install cross
+      - name: Install aarch64 toolchain
+        run: |
+          rustup target add aarch64-unknown-linux-gnu
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
       - name: Build release (aarch64)
-        run: cross build --release --target aarch64-unknown-linux-gnu
+        run: cargo build --release --target aarch64-unknown-linux-gnu
       - name: Upload aarch64 artifact
         uses: actions/upload-artifact@v4
         with:
