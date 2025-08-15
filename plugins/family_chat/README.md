@@ -70,6 +70,6 @@ To run the end-to-end test that exercises the compiled UI and binary:
 ```
 cd plugins/family_chat/webui && npm run build
 cargo build -p family_chat --release
-cd .. && npx playwright test
+cd .. && npx playwright test -c e2e/playwright.config.js
 ```
 
