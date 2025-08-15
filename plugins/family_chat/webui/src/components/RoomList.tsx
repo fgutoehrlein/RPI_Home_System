@@ -22,7 +22,7 @@ export default function RoomList() {
       setRooms((r) => [...r, room]);
       setOpen(false);
       setName('');
-      navigate(`/rooms/${room.id}`);
+      navigate(`/room/${room.id}`);
     } catch (err) {
       console.error(err);
     }
@@ -38,12 +38,17 @@ export default function RoomList() {
           </li>
         ))}
       </ul>
-      <button className="mt-2 px-2 py-1 text-sm text-blue-600" onClick={() => setOpen(true)}>
+      <button
+        data-testid="new-room-button"
+        className="mt-2 px-2 py-1 text-sm text-blue-600"
+        onClick={() => setOpen(true)}
+      >
         New Room
       </button>
       <Modal open={open} onClose={() => setOpen(false)}>
         <form onSubmit={createRoom} className="space-y-2">
           <input
+            data-testid="new-room-name"
             autoFocus
             placeholder="Room name"
             value={name}
@@ -51,7 +56,12 @@ export default function RoomList() {
             className="border p-1"
           />
           <div className="text-right">
-            <button type="submit" className="px-2 py-1 bg-blue-500 text-white rounded" disabled={!name.trim()}>
+            <button
+              type="submit"
+              data-testid="new-room-submit"
+              className="px-2 py-1 bg-blue-500 text-white rounded"
+              disabled={!name.trim()}
+            >
               Create
             </button>
           </div>

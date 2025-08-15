@@ -20,6 +20,7 @@ export default function Composer({ onSend }: Props) {
   return (
     <div className="border-t p-2">
       <textarea
+        data-testid="composer-input"
         className="w-full resize-none rounded border p-2"
         placeholder="Type a message"
         value={text}
