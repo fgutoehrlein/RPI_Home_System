@@ -7,14 +7,17 @@ export type WSEvent =
   | { t: 'read'; room_id: string; user_id: string; message_id: string };
 
 export function connect(token: string, onEvent: (e: WSEvent) => void) {
-  const base = (window as any).__FC_BASE__ || import.meta.env.VITE_FAMILY_CHAT_BASE || '';
+  const base =
+    (globalThis as any).__FC_BASE__ ||
+    (import.meta as any).env?.VITE_FAMILY_CHAT_BASE ||
+    '';
   const url = base.replace(/^http/, 'ws') + `/ws?token=${token}`;
   let ws: WebSocket | null = null;
   let queue: any[] = [];
   let retry = 1000;
 
   function send(data: any) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
+    if (ws && ws.readyState === globalThis.WebSocket.OPEN) {
       ws.send(JSON.stringify(data));
     } else {
       queue.push(data);
@@ -22,7 +25,7 @@ export function connect(token: string, onEvent: (e: WSEvent) => void) {
   }
 
   function open() {
-    ws = new WebSocket(url);
+    ws = new globalThis.WebSocket(url);
     ws.onopen = () => {
       retry = 1000;
       queue.splice(0).forEach(send);
@@ -49,6 +52,9 @@ export function connect(token: string, onEvent: (e: WSEvent) => void) {
     },
     sendMessage(payload: any) {
       send({ t: 'send', ...payload });
+    },
+    close() {
+      ws?.close();
     },
   };
 }

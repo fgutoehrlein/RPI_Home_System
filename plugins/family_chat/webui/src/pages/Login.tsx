@@ -1,15 +1,17 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { setToken } from '../lib/auth';
 
 export default function Login() {
   const [username, setUsername] = useState('');
   const [passphrase, setPassphrase] = useState('');
+  const navigate = useNavigate();
 
   async function submit() {
     const res = await api.login(username, passphrase);
     setToken(res.token);
-    window.location.href = '/room/1';
+    navigate('/room/1');
   }
 
   return (
@@ -20,6 +22,7 @@ export default function Login() {
         placeholder="Username"
         value={username}
         onChange={(e) => setUsername(e.target.value)}
+        data-testid="login-username"
       />
       <input
         type="password"
@@ -27,8 +30,13 @@ export default function Login() {
         placeholder="Passphrase"
         value={passphrase}
         onChange={(e) => setPassphrase(e.target.value)}
+        data-testid="login-password"
       />
-      <button className="rounded bg-blue-600 px-4 py-2 text-white" onClick={submit}>
+      <button
+        className="rounded bg-blue-600 px-4 py-2 text-white"
+        onClick={submit}
+        data-testid="login-submit"
+      >
         Login
       </button>
     </div>

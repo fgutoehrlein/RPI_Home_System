@@ -22,7 +22,7 @@ export default function RoomList() {
       setRooms((r) => [...r, room]);
       setOpen(false);
       setName('');
-      navigate(`/rooms/${room.id}`);
+      navigate(`/room/${room.id}`);
     } catch (err) {
       console.error(err);
     }
@@ -38,7 +38,11 @@ export default function RoomList() {
           </li>
         ))}
       </ul>
-      <button className="mt-2 px-2 py-1 text-sm text-blue-600" onClick={() => setOpen(true)}>
+      <button
+        className="mt-2 px-2 py-1 text-sm text-blue-600"
+        onClick={() => setOpen(true)}
+        data-testid="new-room-button"
+      >
         New Room
       </button>
       <Modal open={open} onClose={() => setOpen(false)}>
@@ -49,9 +53,15 @@ export default function RoomList() {
             value={name}
             onChange={(e) => setName(e.target.value)}
             className="border p-1"
+            data-testid="new-room-name"
           />
           <div className="text-right">
-            <button type="submit" className="px-2 py-1 bg-blue-500 text-white rounded" disabled={!name.trim()}>
+            <button
+              type="submit"
+              className="px-2 py-1 bg-blue-500 text-white rounded"
+              disabled={!name.trim()}
+              data-testid="new-room-submit"
+            >
               Create
             </button>
           </div>
