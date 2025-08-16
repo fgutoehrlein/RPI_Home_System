@@ -5,6 +5,11 @@ import { fetch, Headers, Request, Response } from 'undici';
 import WS from 'ws';
 import { webcrypto } from 'crypto';
 import { describe, it, expect } from 'vitest';
+import fs from 'fs';
+import path from 'path';
+
+const bin = path.resolve(__dirname, '../../../../target/release/family_chat');
+const describeIf = fs.existsSync(bin) ? describe : describe.skip;
 
 function polyfill() {
   (globalThis as any).fetch = fetch as any;
@@ -22,7 +27,7 @@ function polyfill() {
   };
 }
 
-describe('agent e2e message flow', () => {
+describeIf('agent e2e message flow', () => {
   it('sends and displays a message', async () => {
     await withRunningPlugin(async ({ baseUrl }) => {
       polyfill();
