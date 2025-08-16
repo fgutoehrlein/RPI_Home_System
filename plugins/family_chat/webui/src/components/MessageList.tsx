@@ -9,12 +9,14 @@ interface Props {
 export default function MessageList({ messages }: Props) {
   const itemSize = 80;
   return (
-    <List height={400} width={'100%'} itemCount={messages.length} itemSize={itemSize}>
-      {({ index, style }) => (
-        <div style={style}>
-          <MessageItem message={messages[index]} />
-        </div>
-      )}
-    </List>
+    <div data-testid="message-list">
+      <List height={400} width={'100%'} itemCount={messages.length} itemSize={itemSize}>
+        {({ index, style }) => (
+          <div style={style} data-testid="message-item">
+            <MessageItem message={messages[index]} />
+          </div>
+        )}
+      </List>
+    </div>
   );
 }

@@ -1,10 +1,16 @@
 import { AuthMe, LoginResponse, Message, Room, FileUploadResponse, SearchResult } from './types';
 import { getToken, clearToken } from './auth';
 
-const DEFAULT_BASE = (window as any).__FC_BASE__ || import.meta.env.VITE_FAMILY_CHAT_BASE || '';
+function getBase(): string {
+  return (
+    (globalThis as any).__FC_BASE__ ||
+    (import.meta as any).env?.VITE_FAMILY_CHAT_BASE ||
+    ''
+  );
+}
 
 function buildUrl(path: string): string {
-  return `${DEFAULT_BASE}${path}`;
+  return `${getBase()}${path}`;
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -15,7 +21,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   };
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
-  const res = await fetch(buildUrl(path), { ...init, headers });
+  const res = await globalThis.fetch(buildUrl(path), { ...init, headers });
   if (res.status === 401) {
     clearToken();
     window.location.href = '/login';
@@ -73,7 +79,7 @@ export const api = {
   uploadFile(file: File) {
     const form = new FormData();
     form.append('file', file);
-    return fetch(buildUrl('/api/files'), {
+    return globalThis.fetch(buildUrl('/api/files'), {
       method: 'POST',
       headers: { Authorization: `Bearer ${getToken()}` },
       body: form,

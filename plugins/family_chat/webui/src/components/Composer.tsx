@@ -26,6 +26,7 @@ export default function Composer({ onSend }: Props) {
         rows={3}
         onKeyDown={handleKey}
         onChange={(e) => setText(e.target.value)}
+        data-testid="composer-input"
       />
     </div>
   );
