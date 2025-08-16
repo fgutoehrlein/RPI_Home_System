@@ -8,8 +8,18 @@ import { describe, it, expect } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 
-const bin = path.resolve(__dirname, '../../../../target/release/family_chat');
-const describeIf = fs.existsSync(bin) ? describe : describe.skip;
+const bin = path.resolve(
+  __dirname,
+  '../../../../target/release/family_chat',
+);
+const describeIf = (() => {
+  try {
+    fs.accessSync(bin, fs.constants.X_OK);
+    return describe;
+  } catch {
+    return describe.skip;
+  }
+})();
 
 function polyfill() {
   (globalThis as any).fetch = fetch as any;
