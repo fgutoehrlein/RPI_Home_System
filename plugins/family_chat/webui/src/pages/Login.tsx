@@ -16,6 +16,7 @@ export default function Login() {
     <div className="p-4 max-w-sm mx-auto">
       <h1 className="mb-2 text-xl">Login</h1>
       <input
+        data-testid="login-username"
         className="mb-2 w-full rounded border p-2"
         placeholder="Username"
         value={username}
@@ -23,12 +24,17 @@ export default function Login() {
       />
       <input
         type="password"
+        data-testid="login-password"
         className="mb-2 w-full rounded border p-2"
         placeholder="Passphrase"
         value={passphrase}
         onChange={(e) => setPassphrase(e.target.value)}
       />
-      <button className="rounded bg-blue-600 px-4 py-2 text-white" onClick={submit}>
+      <button
+        data-testid="login-submit"
+        className="rounded bg-blue-600 px-4 py-2 text-white"
+        onClick={submit}
+      >
         Login
       </button>
     </div>

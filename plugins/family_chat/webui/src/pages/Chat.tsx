@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useParams } from 'react-router-dom';
 import Layout from '../components/Layout';
 import MessageList from '../components/MessageList';
 import Composer from '../components/Composer';
@@ -7,10 +8,13 @@ import { api } from '../lib/api';
 
 export default function Chat() {
   const [messages, setMessages] = useState<Message[]>([]);
+  const params = useParams<{ id: string }>();
+  const roomId = params.id || '1';
 
   useEffect(() => {
+    setMessages([]);
     api
-      .getMessages('1')
+      .getMessages(roomId)
       .then((msgs) => {
         setMessages((existing) => {
           const ids = new Set(existing.map((m) => m.id));
@@ -22,19 +26,19 @@ export default function Chat() {
         });
       })
       .catch(console.error);
-  }, []);
+  }, [roomId]);
 
   async function send(text: string) {
     const temp: Message = {
       id: `tmp-${Date.now()}`,
-      room_id: '1',
+      room_id: roomId,
       text_md: text,
       created_at: new Date().toISOString(),
       user: { id: 'me', username: 'me', display_name: 'Me' },
     } as Message;
     setMessages((m) => [...m, temp]);
     try {
-      const msg = await api.sendMessage({ room_id: '1', text_md: text });
+      const msg = await api.sendMessage({ room_id: roomId, text_md: text });
       setMessages((m) => m.map((x) => (x.id === temp.id ? msg : x)));
     } catch (e) {
       setMessages((m) => m.filter((x) => x.id !== temp.id));
