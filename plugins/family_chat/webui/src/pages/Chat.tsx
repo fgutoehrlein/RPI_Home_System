@@ -11,10 +11,12 @@ import { getToken } from '../lib/auth';
 export default function Chat() {
   const [messages, setMessages] = useState<Message[]>([]);
   const { id } = useParams<{ id: string }>();
-  const roomId = id || '1';
+  const isValidRoom = id && id.length === 36; // very light UUID check
+  const roomId = isValidRoom ? id! : null;
   const wsRef = useRef<ReturnType<typeof connect> | null>(null);
 
   useEffect(() => {
+    if (!roomId) return;
     api
       .getMessages(roomId)
       .then((msgs) => {
@@ -32,7 +34,7 @@ export default function Chat() {
 
   useEffect(() => {
     const token = getToken();
-    if (!token) return;
+    if (!token || !roomId) return;
     const ws = connect(token, (e) => {
       if (e.t === 'message' && e.room_id === roomId) {
         setMessages((m) => {
@@ -54,6 +56,7 @@ export default function Chat() {
   }, [roomId]);
 
   async function send(text: string) {
+    if (!roomId) return;
     const temp: Message = {
       id: `tmp-${Date.now()}`,
       room_id: roomId,
@@ -74,6 +77,14 @@ export default function Chat() {
       setMessages((m) => m.filter((x) => x.id !== temp.id));
       console.error(e);
     }
+  }
+
+  if (!roomId) {
+    return (
+      <Layout>
+        <div className="p-4 text-gray-500">Select or create a room to start chatting.</div>
+      </Layout>
+    );
   }
 
   return (
