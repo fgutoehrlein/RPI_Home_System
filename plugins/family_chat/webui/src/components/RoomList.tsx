@@ -11,7 +11,13 @@ export default function RoomList() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    api.listRooms().then(setRooms).catch(console.error);
+    api
+      .listRooms()
+      .then((rs) => {
+        const unique = Array.from(new Map(rs.map((r) => [r.id, r])).values());
+        setRooms(unique);
+      })
+      .catch(console.error);
   }, []);
 
   async function createRoom(e: FormEvent) {
@@ -19,7 +25,7 @@ export default function RoomList() {
     if (!name.trim()) return;
     try {
       const room = await api.createRoom(name.trim());
-      setRooms((r) => [...r, room]);
+      setRooms((r) => (r.some((x) => x.id === room.id) ? r : [...r, room]));
       setOpen(false);
       setName('');
       navigate(`/room/${room.id}`);
@@ -33,8 +39,13 @@ export default function RoomList() {
       <h2 className="px-2 py-1 text-xs font-semibold">Rooms</h2>
       <ul className="space-y-1">
         {rooms.map((r) => (
-          <li key={r.id} className="px-2 py-1 rounded hover:bg-gray-200 cursor-pointer">
-            {r.name}
+          <li key={r.id}>
+            <button
+              className="w-full px-2 py-1 text-left rounded hover:bg-gray-200"
+              onClick={() => navigate(`/room/${r.id}`)}
+            >
+              {r.name}
+            </button>
           </li>
         ))}
       </ul>

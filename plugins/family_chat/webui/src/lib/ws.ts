@@ -15,6 +15,7 @@ export function connect(token: string, onEvent: (e: WSEvent) => void) {
   let ws: WebSocket | null = null;
   let queue: any[] = [];
   let retry = 1000;
+  let stopped = false;
 
   function send(data: any) {
     if (ws && ws.readyState === globalThis.WebSocket.OPEN) {
@@ -25,6 +26,7 @@ export function connect(token: string, onEvent: (e: WSEvent) => void) {
   }
 
   function open() {
+    if (stopped) return;
     ws = new globalThis.WebSocket(url);
     ws.onopen = () => {
       retry = 1000;
@@ -38,7 +40,11 @@ export function connect(token: string, onEvent: (e: WSEvent) => void) {
         console.error('ws parse', e);
       }
     };
+    ws.onerror = (err) => {
+      console.error('ws error', err);
+    };
     ws.onclose = () => {
+      if (stopped) return;
       setTimeout(open, retry);
       retry = Math.min(retry * 2, 10000);
     };
@@ -54,6 +60,7 @@ export function connect(token: string, onEvent: (e: WSEvent) => void) {
       send({ t: 'send', ...payload });
     },
     close() {
+      stopped = true;
       ws?.close();
     },
   };

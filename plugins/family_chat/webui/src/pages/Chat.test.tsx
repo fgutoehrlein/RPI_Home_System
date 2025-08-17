@@ -2,7 +2,7 @@
 import { render, screen, fireEvent } from '@testing-library/react';
 import { vi, expect, test } from 'vitest';
 import '@testing-library/jest-dom/vitest';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Routes, Route } from 'react-router-dom';
 
 vi.mock('../components/Layout', () => ({ default: ({ children }: any) => <div>{children}</div> }));
 vi.mock('../components/MessageList', () => ({
@@ -31,15 +31,17 @@ test('sending a message shows it immediately', async () => {
   vi.spyOn(api, 'getMessages').mockReturnValue(getMessages.promise as any);
   vi.spyOn(api, 'sendMessage').mockResolvedValue({
     id: 'temp',
-    room_id: '1',
+    room_id: '00000000-0000-0000-0000-000000000001',
     text_md: 'hello',
     user: { id: 'u1', username: 'me', display_name: 'Me' },
     created_at: 'now',
   } as any);
 
   render(
-    <MemoryRouter>
-      <Chat />
+    <MemoryRouter initialEntries={['/room/00000000-0000-0000-0000-000000000001']}>
+      <Routes>
+        <Route path="/room/:id" element={<Chat />} />
+      </Routes>
     </MemoryRouter>
   );
 

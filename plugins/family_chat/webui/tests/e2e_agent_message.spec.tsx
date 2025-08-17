@@ -40,43 +40,56 @@ function polyfill() {
 
 describeIf('agent e2e message flow', () => {
   it('sends and displays a message', async () => {
-    await withRunningPlugin(async ({ baseUrl }) => {
-      polyfill();
-      (globalThis as any).__FC_BASE__ = baseUrl;
-      (window as any).__FC_BASE__ = baseUrl;
-      sessionStorage.clear();
-      window.history.pushState({}, '', '/login');
-      const { default: App } = await import('../src/App');
-      render(<App />);
+    const errors: unknown[] = [];
+    const originalError = console.error;
+    console.error = (...args: unknown[]) => {
+      errors.push(args);
+      originalError(...args);
+    };
 
-      fireEvent.change(screen.getByTestId('login-username'), {
-        target: { value: 'admin' },
+    try {
+      await withRunningPlugin(async ({ baseUrl }) => {
+        polyfill();
+        (globalThis as any).__FC_BASE__ = baseUrl;
+        (window as any).__FC_BASE__ = baseUrl;
+        sessionStorage.clear();
+        window.history.pushState({}, '', '/login');
+        const { default: App } = await import('../src/App');
+        render(<App />);
+
+        fireEvent.change(screen.getByTestId('login-username'), {
+          target: { value: 'admin' },
+        });
+        fireEvent.change(screen.getByTestId('login-password'), {
+          target: { value: 'admin' },
+        });
+        fireEvent.click(screen.getByTestId('login-submit'));
+
+        await screen.findByTestId('new-room-button');
+
+        fireEvent.click(screen.getByTestId('new-room-button'));
+        const roomName = `e2e-room-${Date.now()}`;
+        fireEvent.change(screen.getByTestId('new-room-name'), {
+          target: { value: roomName },
+        });
+        fireEvent.click(screen.getByTestId('new-room-submit'));
+
+        const composer = await screen.findByTestId('composer-input');
+        const msg = `Hello from Agent E2E ${Date.now()}`;
+        fireEvent.change(composer, { target: { value: msg } });
+        fireEvent.keyDown(composer, { key: 'Enter', code: 'Enter', charCode: 13 });
+
+        await waitFor(() => expect(composer).toHaveValue(''));
+
+        await screen.findByText(msg);
+        await waitFor(() => {
+          expect(screen.queryAllByText(msg).length).toBe(1);
+        });
       });
-      fireEvent.change(screen.getByTestId('login-password'), {
-        target: { value: 'admin' },
-      });
-      fireEvent.click(screen.getByTestId('login-submit'));
 
-      await screen.findByTestId('new-room-button');
-
-      fireEvent.click(screen.getByTestId('new-room-button'));
-      const roomName = `e2e-room-${Date.now()}`;
-      fireEvent.change(screen.getByTestId('new-room-name'), {
-        target: { value: roomName },
-      });
-      fireEvent.click(screen.getByTestId('new-room-submit'));
-
-      const composer = await screen.findByTestId('composer-input');
-      const msg = `Hello from Agent E2E ${Date.now()}`;
-      fireEvent.change(composer, { target: { value: msg } });
-      fireEvent.keyDown(composer, { key: 'Enter', code: 'Enter', charCode: 13 });
-
-      await waitFor(() => expect(composer).toHaveValue(''));
-
-      await screen.findByText(msg);
-      await waitFor(() => {
-        expect(screen.queryAllByText(msg).length).toBe(1);
-      });
-    });
+      expect(errors).toHaveLength(0);
+    } finally {
+      console.error = originalError;
+    }
   }, 60000);
 });
