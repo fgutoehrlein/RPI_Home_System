@@ -4,20 +4,22 @@ import Login from './Login';
 import { api } from '../lib/api';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
+const navigate = vi.fn();
+vi.mock('react-router-dom', () => ({
+  useNavigate: () => navigate,
+}));
+
 vi.spyOn(api, 'login');
 
 describe('Login', () => {
   beforeEach(() => {
     (api.login as any).mockResolvedValue({ token: 'abc' });
     sessionStorage.clear();
-    Object.defineProperty(window, 'location', {
-      value: { href: '' },
-      writable: true,
-    });
+    navigate.mockReset();
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
   });
 
   it('stores token and redirects on success', async () => {
@@ -26,6 +28,6 @@ describe('Login', () => {
     fireEvent.change(screen.getByPlaceholderText('Passphrase'), { target: { value: 'pw' } });
     fireEvent.click(screen.getByRole('button', { name: 'Login' }));
     await waitFor(() => expect(sessionStorage.getItem('fc_token')).toBe('abc'));
-    expect(window.location.href).toBe('/room/1');
+    expect(navigate).toHaveBeenCalledWith('/room/1');
   });
 });
