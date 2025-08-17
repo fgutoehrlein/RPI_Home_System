@@ -10,7 +10,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:e2e-agent": "vitest run tests/e2e_agent_message.spec.tsx --environment jsdom --reporter=junit --outputFile=e2e-agent-report.xml --passWithNoTests"
+    "test:e2e-agent": "node scripts/run-e2e-agent.mjs"
   },
   "dependencies": {
     "dompurify": "^3.0.6",
