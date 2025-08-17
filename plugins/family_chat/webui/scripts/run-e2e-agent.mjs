@@ -21,12 +21,19 @@ const args = [
   'tests/e2e_agent_message.spec.tsx',
   '--environment',
   'jsdom',
+];
+
+if (process.env.GITHUB_ACTIONS) {
+  args.push('--reporter', 'default');
+}
+
+args.push(
   '--reporter',
   'junit',
   '--outputFile',
   report,
   '--passWithNoTests',
-];
+);
 
 const child = spawn('vitest', args, { stdio: 'inherit' });
 child.on('exit', (code) => process.exit(code ?? 1));
