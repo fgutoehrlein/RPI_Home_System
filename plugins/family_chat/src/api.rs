@@ -244,8 +244,13 @@ async fn auth_middleware<B>(
         .or_else(|| {
             if req.uri().path().starts_with("/ws") {
                 req.uri().query().and_then(|q| {
-                    url::form_urlencoded::parse(q.as_bytes())
-                        .find_map(|(k, v)| if k == "token" { Some(v.into_owned()) } else { None })
+                    url::form_urlencoded::parse(q.as_bytes()).find_map(|(k, v)| {
+                        if k == "token" {
+                            Some(v.into_owned())
+                        } else {
+                            None
+                        }
+                    })
                 })
             } else {
                 None
