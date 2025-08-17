@@ -235,29 +235,46 @@ async fn auth_middleware<B>(
     mut req: Request<B>,
     next: Next<B>,
 ) -> Result<Response, StatusCode> {
-    if let Some(value) = req.headers().get(header::AUTHORIZATION) {
-        if let Ok(value) = value.to_str() {
-            if let Some(token) = value.strip_prefix("Bearer ") {
-                let (secret, users) = {
-                    let guard = state.auth.lock().await;
-                    guard
-                        .as_ref()
-                        .map(|c| (c.jwt_secret.clone(), c.users.clone()))
-                        .unwrap_or_default()
-                };
-                if !secret.is_empty() {
-                    if let Ok(claims) =
-                        auth::verify_jwt(&STANDARD.decode(&secret).unwrap_or_default(), token)
-                    {
-                        if let Some(user) = users
-                            .into_iter()
-                            .find(|u| u.username.eq_ignore_ascii_case(&claims.sub) && !u.disabled)
-                        {
-                            req.extensions_mut().insert(claims);
-                            req.extensions_mut().insert(user);
-                            return Ok(next.run(req).await);
+    let token = req
+        .headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(str::to_owned)
+        .or_else(|| {
+            if req.uri().path().starts_with("/ws") {
+                req.uri().query().and_then(|q| {
+                    url::form_urlencoded::parse(q.as_bytes()).find_map(|(k, v)| {
+                        if k == "token" {
+                            Some(v.into_owned())
+                        } else {
+                            None
                         }
-                    }
+                    })
+                })
+            } else {
+                None
+            }
+        });
+    if let Some(token) = token {
+        let (secret, users) = {
+            let guard = state.auth.lock().await;
+            guard
+                .as_ref()
+                .map(|c| (c.jwt_secret.clone(), c.users.clone()))
+                .unwrap_or_default()
+        };
+        if !secret.is_empty() {
+            if let Ok(claims) =
+                auth::verify_jwt(&STANDARD.decode(&secret).unwrap_or_default(), &token)
+            {
+                if let Some(user) = users
+                    .into_iter()
+                    .find(|u| u.username.eq_ignore_ascii_case(&claims.sub) && !u.disabled)
+                {
+                    req.extensions_mut().insert(claims);
+                    req.extensions_mut().insert(user);
+                    return Ok(next.run(req).await);
                 }
             }
         }

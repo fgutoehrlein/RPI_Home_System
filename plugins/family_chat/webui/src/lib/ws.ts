@@ -33,6 +33,8 @@ export function connect(token: string, onEvent: (e: WSEvent) => void) {
       queue.splice(0).forEach(send);
     };
     ws.onmessage = (ev) => {
+      if (typeof ev.data !== 'string') return;
+      if (ev.data === 'hello') return;
       try {
         const data = JSON.parse(ev.data);
         onEvent(data as WSEvent);
