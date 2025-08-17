@@ -26,11 +26,11 @@ jobs:
       - name: Build UI
         working-directory: plugins/family_chat/webui
         run: npm run build
-      - name: Build family_chat plugin
-        run: cargo build -p family_chat --release
       - name: Agent E2E
-        working-directory: plugins/family_chat/webui
-        run: npm run test:e2e-agent
+        run: |
+          cargo build -p family_chat --release
+          cd plugins/family_chat/webui
+          npm run test:e2e-agent
       - name: Format
         run: cargo fmt --all -- --check
       - name: Clippy

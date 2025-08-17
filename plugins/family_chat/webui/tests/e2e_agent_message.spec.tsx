@@ -5,6 +5,7 @@ import { fetch, Headers, Request, Response } from 'undici';
 import WS from 'ws';
 import { webcrypto } from 'crypto';
 import { describe, it, expect } from 'vitest';
+import '@testing-library/jest-dom/vitest';
 import fs from 'fs';
 import path from 'path';
 
