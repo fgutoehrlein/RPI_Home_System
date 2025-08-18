@@ -10,27 +10,11 @@ import { getToken } from '../lib/auth';
 
 export default function Chat() {
   const [messages, setMessages] = useState<Message[]>([]);
+  const [wsConnected, setWsConnected] = useState(false);
   const { id } = useParams<{ id: string }>();
   const isValidRoom = id && id.length === 36; // very light UUID check
   const roomId = isValidRoom ? id! : null;
   const wsRef = useRef<ReturnType<typeof connect> | null>(null);
-
-  useEffect(() => {
-    if (!roomId) return;
-    api
-      .getMessages(roomId)
-      .then((msgs) => {
-        setMessages((existing) => {
-          const ids = new Set(existing.map((m) => m.id));
-          const merged = [...existing];
-          for (const msg of msgs) {
-            if (!ids.has(msg.id)) merged.push(msg);
-          }
-          return merged;
-        });
-      })
-      .catch(console.error);
-  }, [roomId]);
 
   useEffect(() => {
     const token = getToken();
@@ -51,8 +35,26 @@ export default function Chat() {
         });
       }
     });
+    const off = ws.onStatus((s) => setWsConnected(s === 'open'));
+    ws.join(roomId);
     wsRef.current = ws;
-    return () => ws.close();
+    api
+      .getMessages(roomId)
+      .then((msgs) => {
+        setMessages((existing) => {
+          const ids = new Set(existing.map((m) => m.id));
+          const merged = [...existing];
+          for (const msg of msgs) {
+            if (!ids.has(msg.id)) merged.push(msg);
+          }
+          return merged;
+        });
+      })
+      .catch(console.error);
+    return () => {
+      off();
+      ws.close();
+    };
   }, [roomId]);
 
   async function send(text: string) {
@@ -89,6 +91,9 @@ export default function Chat() {
 
   return (
     <Layout>
+      <div data-testid="ws-status" className="hidden">
+        {wsConnected ? 'connected' : 'disconnected'}
+      </div>
       <MessageList messages={messages} />
       <Composer onSend={send} />
     </Layout>
