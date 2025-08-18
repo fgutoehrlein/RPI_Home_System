@@ -6,7 +6,10 @@ export type WSEvent =
   | { t: 'message_delete'; room_id: string; message_id: string }
   | { t: 'read'; room_id: string; user_id: string; message_id: string };
 
-export function connect(token: string, onEvent: (e: WSEvent) => void) {
+export function connect(
+  token: string,
+  onEvent: (e: WSEvent) => void,
+) {
   const base =
     (globalThis as any).__FC_BASE__ ||
     (import.meta as any).env?.VITE_FAMILY_CHAT_BASE ||
@@ -16,6 +19,11 @@ export function connect(token: string, onEvent: (e: WSEvent) => void) {
   let queue: any[] = [];
   let retry = 1000;
   let stopped = false;
+  const statusListeners = new Set<(status: 'open' | 'closed') => void>();
+
+  function emit(status: 'open' | 'closed') {
+    statusListeners.forEach((l) => l(status));
+  }
 
   function send(data: any) {
     if (ws && ws.readyState === globalThis.WebSocket.OPEN) {
@@ -31,6 +39,7 @@ export function connect(token: string, onEvent: (e: WSEvent) => void) {
     ws.onopen = () => {
       retry = 1000;
       queue.splice(0).forEach(send);
+      emit('open');
     };
     ws.onmessage = (ev) => {
       if (typeof ev.data !== 'string') return;
@@ -46,6 +55,7 @@ export function connect(token: string, onEvent: (e: WSEvent) => void) {
       console.error('ws error', err);
     };
     ws.onclose = () => {
+      emit('closed');
       if (stopped) return;
       setTimeout(open, retry);
       retry = Math.min(retry * 2, 10000);
@@ -55,6 +65,9 @@ export function connect(token: string, onEvent: (e: WSEvent) => void) {
   open();
 
   return {
+    join(roomId: string) {
+      send({ action: 'join', room_id: roomId });
+    },
     sendTyping(roomId: string) {
       send({ t: 'typing', room_id: roomId });
     },
@@ -64,6 +77,10 @@ export function connect(token: string, onEvent: (e: WSEvent) => void) {
     close() {
       stopped = true;
       ws?.close();
+    },
+    onStatus(fn: (status: 'open' | 'closed') => void) {
+      statusListeners.add(fn);
+      return () => statusListeners.delete(fn);
     },
   };
 }

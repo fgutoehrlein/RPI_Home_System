@@ -19,6 +19,7 @@ try {
 const args = [
   'run',
   'tests/e2e_agent_message.spec.tsx',
+  'tests/e2e_agent_realtime.spec.tsx',
   '--environment',
   'jsdom',
 ];
