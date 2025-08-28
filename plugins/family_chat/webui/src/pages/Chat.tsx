@@ -3,18 +3,23 @@ import { useParams } from 'react-router-dom';
 import Layout from '../components/Layout';
 import MessageList from '../components/MessageList';
 import Composer from '../components/Composer';
+import TypingIndicator from '../components/TypingIndicator';
 import { Message } from '../lib/types';
 import { api } from '../lib/api';
 import { connect } from '../lib/ws';
 import { getToken } from '../lib/auth';
+import { useStore } from '../lib/store';
 
 export default function Chat() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [wsConnected, setWsConnected] = useState(false);
+  const [typingUsers, setTypingUsers] = useState<Record<string, string>>({});
   const { id } = useParams<{ id: string }>();
   const isValidRoom = id && id.length === 36; // very light UUID check
   const roomId = isValidRoom ? id! : null;
   const wsRef = useRef<ReturnType<typeof connect> | null>(null);
+  const typingRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const me = useStore((s) => s.user);
 
   useEffect(() => {
     const token = getToken();
@@ -33,6 +38,17 @@ export default function Chat() {
           if (m.some((x) => x.id === e.message.id)) return m;
           return [...m, e.message];
         });
+      } else if (e.t === 'typing' && e.room_id === roomId && e.user_id !== me?.id) {
+        setTypingUsers((u) => ({ ...u, [e.user_id]: e.display_name }));
+        const t = typingRef.current[e.user_id];
+        if (t) clearTimeout(t);
+        typingRef.current[e.user_id] = setTimeout(() => {
+          setTypingUsers((u) => {
+            const { [e.user_id]: _, ...rest } = u;
+            return rest;
+          });
+          delete typingRef.current[e.user_id];
+        }, 3000);
       }
     });
     const off = ws.onStatus((s) => setWsConnected(s === 'open'));
@@ -54,8 +70,11 @@ export default function Chat() {
     return () => {
       off();
       ws.close();
+      Object.values(typingRef.current).forEach(clearTimeout);
+      typingRef.current = {};
+      setTypingUsers({});
     };
-  }, [roomId]);
+  }, [roomId, me?.id]);
 
   async function send(text: string) {
     if (!roomId) return;
@@ -64,7 +83,7 @@ export default function Chat() {
       room_id: roomId,
       text_md: text,
       created_at: new Date().toISOString(),
-      user: { id: 'me', username: 'me', display_name: 'Me' },
+      user: me || { id: 'me', username: 'me', display_name: 'Me' },
     } as Message;
     setMessages((m) => [...m, temp]);
     try {
@@ -95,7 +114,11 @@ export default function Chat() {
         {wsConnected ? 'connected' : 'disconnected'}
       </div>
       <MessageList messages={messages} />
-      <Composer onSend={send} />
+      <TypingIndicator names={Object.values(typingUsers)} />
+      <Composer
+        onSend={send}
+        onTyping={() => roomId && wsRef.current?.sendTyping(roomId)}
+      />
     </Layout>
   );
 }

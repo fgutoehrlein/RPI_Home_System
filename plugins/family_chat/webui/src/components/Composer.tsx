@@ -2,9 +2,10 @@ import { useState, KeyboardEvent } from 'react';
 
 interface Props {
   onSend: (text: string) => void;
+  onTyping?: () => void;
 }
 
-export default function Composer({ onSend }: Props) {
+export default function Composer({ onSend, onTyping }: Props) {
   const [text, setText] = useState('');
 
   function handleKey(e: KeyboardEvent<HTMLTextAreaElement>) {
@@ -25,7 +26,10 @@ export default function Composer({ onSend }: Props) {
         value={text}
         rows={3}
         onKeyDown={handleKey}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => {
+          setText(e.target.value);
+          onTyping?.();
+        }}
         data-testid="composer-input"
       />
     </div>

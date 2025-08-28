@@ -1,8 +1,10 @@
+import { Message } from './types';
+
 export type WSEvent =
   | { t: 'presence'; user_id: string; state: string }
-  | { t: 'typing'; room_id: string; user_id: string }
-  | { t: 'message'; room_id: string; message: any }
-  | { t: 'message_edit'; room_id: string; message: any }
+  | { t: 'typing'; room_id: string; user_id: string; display_name: string }
+  | { t: 'message'; room_id: string; message: Message }
+  | { t: 'message_edit'; room_id: string; message: Message }
   | { t: 'message_delete'; room_id: string; message_id: string }
   | { t: 'read'; room_id: string; user_id: string; message_id: string };
 
