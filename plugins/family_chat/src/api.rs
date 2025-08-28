@@ -1,5 +1,6 @@
 use crate::{
-    auth, config::Config, db, embed::ui_router, files, messages, presence, reads, rooms, typing,
+    auth, config::Config, db, embed::ui_router, files, messages, model, presence, reads, rooms,
+    typing,
 };
 use anyhow::Result;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
@@ -302,6 +303,46 @@ struct ErrorResp {
 
 fn err(status: StatusCode, msg: &str) -> (StatusCode, Json<ErrorResp>) {
     (status, Json(ErrorResp { error: msg.into() }))
+}
+
+#[derive(Serialize)]
+struct ChatUser {
+    id: String,
+    username: String,
+    display_name: String,
+}
+
+#[derive(Serialize)]
+struct MessageResp {
+    id: Uuid,
+    room_id: Uuid,
+    text_md: String,
+    created_at: i64,
+    edited_at: Option<i64>,
+    reply_to: Option<Uuid>,
+    user: ChatUser,
+}
+
+#[derive(Serialize)]
+struct SearchResultResp {
+    message: MessageResp,
+    highlights: Vec<String>,
+}
+
+fn msg_with_user(msg: model::Message, user: &auth::User) -> MessageResp {
+    MessageResp {
+        id: msg.id,
+        room_id: msg.room_id,
+        text_md: msg.text_md,
+        created_at: msg.created_at,
+        edited_at: msg.edited_at,
+        reply_to: msg.reply_to,
+        user: ChatUser {
+            id: user.id.to_string(),
+            username: user.username.clone(),
+            display_name: user.display_name.clone(),
+        },
+    }
 }
 
 fn sanitize_avatar(url: Option<String>) -> Result<Option<String>, (StatusCode, Json<ErrorResp>)> {
@@ -880,9 +921,10 @@ async fn post_message(
     })?;
     reads::set_read_pointer(&conn, user.id, &req.room_id, msg.created_at)
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
+    let out = msg_with_user(msg.clone(), &user);
     let _ = state
         .event_tx
-        .send(serde_json::json!({"t":"message","room_id":req.room_id,"message":msg}).to_string());
+        .send(serde_json::json!({"t":"message","room_id":req.room_id,"message":out}).to_string());
     let members: Vec<u32> = state
         .ws_members
         .lock()
@@ -899,7 +941,7 @@ async fn post_message(
             );
         }
     }
-    Ok((StatusCode::CREATED, Json(msg)))
+    Ok((StatusCode::CREATED, Json(out)))
 }
 
 #[derive(Deserialize)]
@@ -938,7 +980,16 @@ async fn list_messages(
     };
     let msgs = messages::list_messages(&conn, &params.room_id, before, limit)
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
-    Ok(Json(msgs))
+    let auth = state.auth.lock().await;
+    let user_map: HashMap<u32, auth::User> = auth
+        .as_ref()
+        .map(|cfg| cfg.users.iter().cloned().map(|u| (u.id, u)).collect())
+        .unwrap_or_default();
+    let out: Vec<MessageResp> = msgs
+        .into_iter()
+        .filter_map(|m| user_map.get(&m.author_id).map(|u| msg_with_user(m, u)))
+        .collect();
+    Ok(Json(out))
 }
 
 #[derive(Deserialize)]
@@ -962,10 +1013,11 @@ async fn edit_message(
             _ => err(StatusCode::INTERNAL_SERVER_ERROR, "db"),
         }
     })?;
+    let out = msg_with_user(msg.clone(), &user);
     let _ = state.event_tx.send(
-        serde_json::json!({"t":"message_edit","room_id":msg.room_id,"message":msg}).to_string(),
+        serde_json::json!({"t":"message_edit","room_id":msg.room_id,"message":out}).to_string(),
     );
-    Ok(Json(msg))
+    Ok(Json(out))
 }
 
 async fn delete_message(
@@ -1005,7 +1057,23 @@ async fn search_messages(
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
     let res = messages::search_messages(&conn, &params.q, params.room_id.as_ref())
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db"))?;
-    Ok(Json(res))
+    let auth = state.auth.lock().await;
+    let user_map: HashMap<u32, auth::User> = auth
+        .as_ref()
+        .map(|cfg| cfg.users.iter().cloned().map(|u| (u.id, u)).collect())
+        .unwrap_or_default();
+    let out: Vec<SearchResultResp> = res
+        .into_iter()
+        .filter_map(|r| {
+            user_map
+                .get(&r.message.author_id)
+                .map(|u| SearchResultResp {
+                    message: msg_with_user(r.message, u),
+                    highlights: r.highlights,
+                })
+        })
+        .collect();
+    Ok(Json(out))
 }
 
 async fn ws_handler(
@@ -1090,7 +1158,13 @@ async fn handle_socket(stream: WebSocket, state: AppState, user: auth::User) {
                                             .unwrap_or(false);
                                         if joined && state.typing.typing(user.id, room_id) {
                                             let _ = state.event_tx.send(
-                                                serde_json::json!({"t":"typing","room_id":room_id,"user_id":user.id}).to_string(),
+                                                serde_json::json!({
+                                                    "t": "typing",
+                                                    "room_id": room_id,
+                                                    "user_id": user.id,
+                                                    "display_name": user.display_name
+                                                })
+                                                .to_string(),
                                             );
                                         }
                                     }
